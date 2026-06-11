@@ -115,8 +115,24 @@
             transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
             display: flex; flex-direction: column;
             overflow: hidden;
+            min-width: 260px; max-width: 96vw;
         }
         #drawer.open { transform: translateX(0); }
+
+        /* ── RESIZE HANDLE ────────────────────────── */
+        #drawerResizeHandle {
+            position: absolute; top: 0; right: -1px; bottom: 0;
+            width: 18px; cursor: ew-resize; z-index: 10;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #drawerResizeHandle::after {
+            content: '';
+            display: block; width: 4px; height: 48px;
+            background: var(--accent); border-radius: 4px;
+            opacity: 0.5; transition: opacity 0.2s, height 0.2s;
+        }
+        #drawerResizeHandle:active::after,
+        #drawerResizeHandle:hover::after { opacity: 1; height: 80px; }
 
         #drawerHead {
             background: var(--bg-dark);
@@ -382,6 +398,7 @@
 
 <!-- ══ DRAWER ══════════════════════════════════════ -->
 <div id="drawer">
+    <div id="drawerResizeHandle" id="drawerResizeHandle"></div>
     <div id="drawerHead">
         <div>
             <div class="logo">Cartum</div>
@@ -558,6 +575,40 @@ const DRIVE_FOLDER = 'Cartum';
 
 // pending confirm callback
 let _confirmCb = null;
+
+// ── DRAWER RESIZE ───────────────────────────────────
+(function() {
+    let resizing = false, startX = 0, startW = 0;
+    const handle = document.getElementById('drawerResizeHandle');
+    const drawer = document.getElementById('drawer');
+
+    function onStart(clientX) {
+        resizing = true;
+        startX = clientX;
+        startW = drawer.offsetWidth;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'ew-resize';
+    }
+    function onMove(clientX) {
+        if (!resizing) return;
+        const newW = Math.max(260, Math.min(window.innerWidth * 0.96, startW + (clientX - startX)));
+        drawer.style.width = newW + 'px';
+        document.documentElement.style.setProperty('--menu-w', newW + 'px');
+    }
+    function onEnd() {
+        resizing = false;
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+    }
+
+    handle.addEventListener('mousedown', e => { e.preventDefault(); onStart(e.clientX); });
+    document.addEventListener('mousemove', e => onMove(e.clientX));
+    document.addEventListener('mouseup', onEnd);
+
+    handle.addEventListener('touchstart', e => { e.stopPropagation(); onStart(e.touches[0].clientX); }, { passive: true });
+    document.addEventListener('touchmove', e => { if (resizing) { e.preventDefault(); onMove(e.touches[0].clientX); } }, { passive: false });
+    document.addEventListener('touchend', onEnd);
+})();
 
 // ── DRAWER ─────────────────────────────────────────
 function toggleDrawer() {
@@ -787,13 +838,72 @@ function showLotInfo(idLot) {
     if (data.Famille) html += row('Famille', data.Famille);
     if (data['Lieu-dit']) html += row('Lieu-dit', data['Lieu-dit']);
     if (data.Cadrage) html += row('Cadrage', data.Cadrage);
+
+    // Texte from CSV (not just commentsData)
+    const csvTexte = data.Texte && data.Texte.trim() && data.Texte !== 'undefined' ? data.Texte : null;
+    if (csvTexte) {
+        html += `<div style="margin-top:8px;padding:8px;background:var(--bg-dark);border-radius:8px;border-left:3px solid var(--accent3);font-size:0.82rem;line-height:1.45;color:var(--text)">${escHtml(csvTexte)}</div>`;
+    }
+
     if (data.Image && data.Image.trim()) {
         html += `<div style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="openImgModal('images/${data.Image}')">🖼 Précisions</button></div>`;
     }
-    body.innerHTML = html;
 
-    // comments
+    // List of lots belonging to same owner
+    if (data.IdProprio && csvData) {
+        const lotsOfOwner = csvData.filter(r => r.IdProprio === data.IdProprio);
+        if (lotsOfOwner.length > 1) {
+            html += `<div style="margin-top:12px">`;
+            html += `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px;font-weight:600">
+                        📋 ${lotsOfOwner.length} lots du propriétaire ${data.IdProprio}
+                     </div>`;
+            html += `<div style="display:flex;flex-direction:column;gap:4px">`;
+            lotsOfOwner.forEach(r => {
+                const isSelected = String(r.IdLot) === String(idLot);
+                const hasText = r.Texte && r.Texte.trim() && r.Texte !== 'undefined';
+                const hasComment = commentsData[r.IdLot];
+                html += `<div onclick="selectLotFromList('${r.IdLot}')"
+                    style="padding:7px 10px;border-radius:8px;cursor:pointer;
+                           background:${isSelected ? 'var(--accent)' : 'var(--bg-dark)'};
+                           border:1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'};
+                           font-size:0.8rem;line-height:1.35">
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <span style="font-weight:700;color:${isSelected ? '#fff' : 'var(--accent3)'}">Lot ${r.IdLot}</span>
+                        ${hasText || hasComment ? '<span style="font-size:0.7rem">💬</span>' : ''}
+                    </div>`;
+                if (r['Lieu-dit']) html += `<div style="color:${isSelected ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)'};font-size:0.75rem">${escHtml(r['Lieu-dit'])}${r.Cadrage ? ' · ' + escHtml(r.Cadrage) : ''}</div>`;
+                if (hasText) html += `<div style="color:${isSelected ? 'rgba(255,255,255,0.75)' : 'var(--text-muted)'};font-size:0.73rem;margin-top:2px;font-style:italic">${escHtml(r.Texte.substring(0,80))}${r.Texte.length>80?'…':''}</div>`;
+                html += `</div>`;
+            });
+            html += `</div></div>`;
+        }
+    }
+
+    body.innerHTML = html;
     updateCommentDisplay();
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function selectLotFromList(idLot) {
+    const el = allSvgElements.find(e => e._csvData && String(e._csvData.IdLot) === String(idLot));
+    clearAllHighlights();
+    if (el) {
+        el.classList.add('hl-selected');
+        // highlight same owner
+        const data = csvData.find(r => String(r.IdLot) === String(idLot));
+        if (data && data.IdProprio) {
+            allSvgElements.forEach(e2 => {
+                if (e2._csvData && e2._csvData.IdProprio === data.IdProprio && e2 !== el) e2.classList.add('hl-same');
+            });
+        }
+        centerOnElement(el);
+    }
+    currentIdLot = idLot;
+    showLotInfo(idLot);
+    updateHeader(idLot);
 }
 
 function row(label, val) {
@@ -1113,10 +1223,14 @@ async function driveLoad() {
     if (!driveToken) { toast('Non connecté'); return; }
     setDriveStatus('Recherche des fichiers…');
     try {
-        const folderId = await getOrCreateFolder(DRIVE_FOLDER);
-        const files = await listDriveFiles(folderId);
-        const svgFile = files.find(f => f.name.endsWith('.svg'));
-        const csvFile = files.find(f => f.name.endsWith('.csv'));
+        // Search SVG and CSV anywhere in Drive (not just root Cartum folder)
+        const [svgFiles, csvFiles] = await Promise.all([
+            searchDriveByType('.svg'),
+            searchDriveByType('.csv')
+        ]);
+        const svgFile = svgFiles[0];
+        const csvFile = csvFiles[0];
+
         if (svgFile) {
             const text = await downloadDriveFile(svgFile.id);
             svgData = text; driveFileIds.svg = svgFile.id;
@@ -1129,8 +1243,12 @@ async function driveLoad() {
             parseCsv(text);
             toast(`CSV chargé : ${csvFile.name}`);
         }
-        if (!svgFile && !csvFile) toast('Aucun fichier SVG/CSV trouvé dans Cartum');
-        setDriveStatus('Fichiers chargés depuis Drive ✓', 'connected');
+        if (!svgFile && !csvFile) {
+            toast('Aucun fichier SVG/CSV trouvé sur Drive');
+            setDriveStatus('Aucun fichier trouvé – vérifiez le dépôt Drive', 'error');
+        } else {
+            setDriveStatus(`Fichiers chargés ✓ (${svgFile ? svgFile.name : '—'} / ${csvFile ? csvFile.name : '—'})`, 'connected');
+        }
     } catch(e) {
         setDriveStatus('Erreur : ' + e.message, 'error');
         toast('Erreur Drive : ' + e.message);
@@ -1189,6 +1307,16 @@ async function driveTest() {
 }
 
 // Drive helpers
+async function searchDriveByType(ext) {
+    // Search ALL of Drive for files with this extension, not limited to one folder
+    const q = encodeURIComponent(`name contains '${ext}' and trashed=false`);
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,parents)&orderBy=modifiedTime desc&pageSize=10`, {
+        headers: { Authorization: 'Bearer ' + driveToken }
+    });
+    const d = await r.json();
+    return d.files || [];
+}
+
 async function getOrCreateFolder(name) {
     const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name)`, {
         headers: { Authorization: 'Bearer ' + driveToken }
