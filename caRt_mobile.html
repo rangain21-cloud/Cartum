@@ -255,9 +255,20 @@
         .pl-item {
             padding: 7px 10px; border-radius: 7px; cursor: pointer;
             background: var(--bg-dark); border: 1px solid var(--border);
-            transition: background 0.15s;
+            transition: background 0.15s, opacity 0.2s, transform 0.2s, padding 0.2s;
         }
-        .pl-item:active, .pl-item.selected { background: var(--accent); border-color: var(--accent); }
+        .pl-item:active, .pl-item.selected {
+            background: var(--accent); border-color: var(--accent);
+        }
+        /* Quand un lot est sélectionné, les autres sont atténués et compressés */
+        .pl-item.dimmed {
+            opacity: 0.28;
+            padding-top: 4px;
+            padding-bottom: 4px;
+            transform: scaleY(0.88);
+            transform-origin: top;
+        }
+        .pl-item.dimmed:active { opacity: 0.7; }
         .pl-item-top { display: flex; align-items: center; gap: 6px; }
         .pl-id { font-size: 0.82rem; font-weight: 700; color: var(--accent3); }
         .pl-item.selected .pl-id { color: #fff; }
@@ -886,6 +897,15 @@ function selectLot(idLot, clickedEl) {
     showLotInfo(idLot);
     updateHeader(idLot);
     openInfoSection();
+    // Rafraîchir la liste du proprio si un filtre est actif ou si ce lot a un proprio
+    const _d = csvData ? csvData.find(r => String(r.IdLot) === String(idLot)) : null;
+    if (_d && _d.IdProprio) {
+        if (activeFilterProprio === _d.IdProprio) {
+            renderProprioLots(_d.IdProprio);
+        } else if (activeFilterProprio) {
+            renderProprioLots(activeFilterProprio);
+        }
+    }
 }
 
 function openInfoSection() { expandSec('sec-info'); }
@@ -899,48 +919,21 @@ function showLotInfo(idLot) {
 
     let html = `<div class="lot-num">Lot ${data.IdLot}</div>`;
     html += row('Propriétaire', data.IdProprio);
-    if (data.Famille) html += row('Famille', data.Famille);
-    if (data['Lieu-dit']) html += row('Lieu-dit', data['Lieu-dit']);
-    if (data.Cadrage) html += row('Cadrage', data.Cadrage);
+    if (data.Famille)      html += row('Famille',   data.Famille);
+    if (data['Lieu-dit'])  html += row('Lieu-dit',  data['Lieu-dit']);
+    if (data.Cadrage)      html += row('Cadrage',   data.Cadrage);
 
-    // Texte from CSV (not just commentsData)
+    // Texte CSV
     const csvTexte = data.Texte && data.Texte.trim() && data.Texte !== 'undefined' ? data.Texte : null;
     if (csvTexte) {
-        html += `<div style="margin-top:8px;padding:8px;background:var(--bg-dark);border-radius:8px;border-left:3px solid var(--accent3);font-size:0.82rem;line-height:1.45;color:var(--text)">${escHtml(csvTexte)}</div>`;
+        html += `<div style="margin-top:8px;padding:8px;background:var(--bg-dark);border-radius:8px;
+                             border-left:3px solid var(--accent3);font-size:0.82rem;line-height:1.45;
+                             color:var(--text)">${escHtml(csvTexte)}</div>`;
     }
 
     if (data.Image && data.Image.trim()) {
-        html += `<div style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="openImgModal('images/${data.Image}')">🖼 Précisions</button></div>`;
-    }
-
-    // List of lots belonging to same owner
-    if (data.IdProprio && csvData) {
-        const lotsOfOwner = csvData.filter(r => r.IdProprio === data.IdProprio);
-        if (lotsOfOwner.length > 1) {
-            html += `<div style="margin-top:12px">`;
-            html += `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px;font-weight:600">
-                        📋 ${lotsOfOwner.length} lots du propriétaire ${data.IdProprio}
-                     </div>`;
-            html += `<div style="display:flex;flex-direction:column;gap:4px">`;
-            lotsOfOwner.forEach(r => {
-                const isSelected = String(r.IdLot) === String(idLot);
-                const hasText = r.Texte && r.Texte.trim() && r.Texte !== 'undefined';
-                const hasComment = commentsData[r.IdLot];
-                html += `<div onclick="selectLotFromList('${r.IdLot}')"
-                    style="padding:7px 10px;border-radius:8px;cursor:pointer;
-                           background:${isSelected ? 'var(--accent)' : 'var(--bg-dark)'};
-                           border:1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'};
-                           font-size:0.8rem;line-height:1.35">
-                    <div style="display:flex;align-items:center;gap:6px">
-                        <span style="font-weight:700;color:${isSelected ? '#fff' : 'var(--accent3)'}">Lot ${r.IdLot}</span>
-                        ${hasText || hasComment ? '<span style="font-size:0.7rem">💬</span>' : ''}
-                    </div>`;
-                if (r['Lieu-dit']) html += `<div style="color:${isSelected ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)'};font-size:0.75rem">${escHtml(r['Lieu-dit'])}${r.Cadrage ? ' · ' + escHtml(r.Cadrage) : ''}</div>`;
-                if (hasText) html += `<div style="color:${isSelected ? 'rgba(255,255,255,0.75)' : 'var(--text-muted)'};font-size:0.73rem;margin-top:2px;font-style:italic">${escHtml(r.Texte.substring(0,80))}${r.Texte.length>80?'…':''}</div>`;
-                html += `</div>`;
-            });
-            html += `</div></div>`;
-        }
+        html += `<div style="margin-top:10px"><button class="btn btn-primary btn-sm"
+                    onclick="openImgModal('images/${data.Image}')">🖼 Précisions</button></div>`;
     }
 
     body.innerHTML = html;
@@ -1208,24 +1201,41 @@ function renderProprioLots(idProprio) {
     const lots = csvData.filter(r => r.IdProprio === idProprio);
     if (!lots.length) { container.classList.remove('visible'); return; }
 
-    // Header count
-    let html = `<div style="font-size:0.75rem;color:var(--text-muted);padding:4px 2px 4px;font-weight:600">
-        ${lots.length} lot${lots.length>1?'s':''} – cliquer pour sélectionner
-    </div>`;
+    // Un lot est-il actif parmi ceux de ce proprio ?
+    const hasActiveLot = currentIdLot && lots.some(r => String(r.IdLot) === String(currentIdLot));
 
+    // Header : si un lot est sélectionné, rappel discret du proprio
+    let header;
+    if (hasActiveLot) {
+        header = `<div style="font-size:0.72rem;color:var(--text-muted);padding:2px 2px 4px;font-weight:600;opacity:0.6">
+            Propriétaire ${idProprio} — ${lots.length} lot${lots.length>1?'s':''} (cliquer pour changer)
+        </div>`;
+    } else {
+        header = `<div style="font-size:0.75rem;color:var(--text-muted);padding:4px 2px 4px;font-weight:600">
+            ${lots.length} lot${lots.length>1?'s':''} — cliquer pour sélectionner
+        </div>`;
+    }
+
+    let html = header;
     lots.forEach(r => {
         const isSelected = String(r.IdLot) === String(currentIdLot);
+        // Atténuer si un autre lot est actif
+        const isDimmed   = hasActiveLot && !isSelected;
         const hasText    = r.Texte && r.Texte.trim() && r.Texte.trim() !== 'undefined';
         const hasCmt     = !!commentsData[r.IdLot];
         const lieuCadrage = [r['Lieu-dit'], r.Cadrage].filter(Boolean).join(' · ');
 
-        html += `<div class="pl-item${isSelected ? ' selected' : ''}" onclick="selectLotFromList('${r.IdLot}')">
+        let cls = 'pl-item';
+        if (isSelected) cls += ' selected';
+        if (isDimmed)   cls += ' dimmed';
+
+        html += `<div class="${cls}" onclick="selectLotFromList('${r.IdLot}')">
             <div class="pl-item-top">
                 <span class="pl-id">Lot ${r.IdLot}</span>
                 ${hasText || hasCmt ? '<span class="pl-badge">💬</span>' : ''}
             </div>`;
-        if (lieuCadrage) html += `<div class="pl-sub">${escHtml(lieuCadrage)}</div>`;
-        if (hasText)     html += `<div class="pl-text">${escHtml(r.Texte.substring(0,90))}${r.Texte.length>90?'…':''}</div>`;
+        if (!isDimmed && lieuCadrage) html += `<div class="pl-sub">${escHtml(lieuCadrage)}</div>`;
+        if (!isDimmed && hasText)     html += `<div class="pl-text">${escHtml(r.Texte.substring(0,90))}${r.Texte.length>90?'…':''}</div>`;
         html += `</div>`;
     });
 
