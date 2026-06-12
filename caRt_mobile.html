@@ -114,7 +114,7 @@
             transform: translateX(-100%);
             transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
             display: flex; flex-direction: column;
-            overflow: hidden;
+            overflow: clip;
             min-width: 260px; max-width: 96vw;
         }
         #drawer.open { transform: translateX(0); }
@@ -151,9 +151,11 @@
         #drawerClose:active { background: var(--bg-card); }
 
         #drawerScroll {
-            flex: 1; overflow-y: auto;
+            flex: 1; overflow-y: auto; overflow-x: hidden;
+            min-height: 0;          /* critical for flex child scrolling */
             padding: 12px;
             display: flex; flex-direction: column; gap: 10px;
+            -webkit-overflow-scrolling: touch; /* smooth scroll on iOS/Android */
         }
         #drawerScroll::-webkit-scrollbar { width: 4px; }
         #drawerScroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -570,7 +572,9 @@ let activeFilterProprio = null;
 let driveToken = null;
 let driveFileIds = { svg: null, csv: null };
 const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.googleusercontent.com'; // à remplir dans GitHub Pages
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// drive.readonly = read ALL files; drive.file = only files created by this app
+// We need readonly to browse existing user files, + drive.file for write/create
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const DRIVE_FOLDER = 'Cartum';
 
 // pending confirm callback
@@ -578,33 +582,35 @@ let _confirmCb = null;
 
 // ── DRAWER RESIZE ───────────────────────────────────
 (function() {
+    const KEY = 'cartum_w';
     let resizing = false, startX = 0, startW = 0;
     const handle = document.getElementById('drawerResizeHandle');
-    const drawer = document.getElementById('drawer');
+    const drawer  = document.getElementById('drawer');
+
+    function applyWidth(w) {
+        w = Math.max(260, Math.min(Math.floor(window.innerWidth * 0.96), w));
+        drawer.style.width = w + 'px';
+        document.documentElement.style.setProperty('--menu-w', w + 'px');
+        try { sessionStorage.setItem(KEY, w); } catch(e) {}
+    }
+
+    // Restore saved width immediately (survives OAuth redirect on Android)
+    try {
+        const saved = sessionStorage.getItem(KEY);
+        if (saved) applyWidth(parseInt(saved));
+    } catch(e) {}
 
     function onStart(clientX) {
-        resizing = true;
-        startX = clientX;
-        startW = drawer.offsetWidth;
+        resizing = true; startX = clientX; startW = drawer.offsetWidth;
         document.body.style.userSelect = 'none';
         document.body.style.cursor = 'ew-resize';
     }
-    function onMove(clientX) {
-        if (!resizing) return;
-        const newW = Math.max(260, Math.min(window.innerWidth * 0.96, startW + (clientX - startX)));
-        drawer.style.width = newW + 'px';
-        document.documentElement.style.setProperty('--menu-w', newW + 'px');
-    }
-    function onEnd() {
-        resizing = false;
-        document.body.style.userSelect = '';
-        document.body.style.cursor = '';
-    }
+    function onMove(clientX) { if (resizing) applyWidth(startW + (clientX - startX)); }
+    function onEnd()  { resizing = false; document.body.style.userSelect = ''; document.body.style.cursor = ''; }
 
     handle.addEventListener('mousedown', e => { e.preventDefault(); onStart(e.clientX); });
     document.addEventListener('mousemove', e => onMove(e.clientX));
     document.addEventListener('mouseup', onEnd);
-
     handle.addEventListener('touchstart', e => { e.stopPropagation(); onStart(e.touches[0].clientX); }, { passive: true });
     document.addEventListener('touchmove', e => { if (resizing) { e.preventDefault(); onMove(e.touches[0].clientX); } }, { passive: false });
     document.addEventListener('touchend', onEnd);
@@ -1202,11 +1208,40 @@ function driveConnect() {
 }
 
 function checkDriveCallback() {
+    // Case 1 – returning from Google OAuth (URL contains #access_token=...)
     const hash = window.location.hash;
-    if (!hash.includes('access_token')) return;
-    const p = new URLSearchParams(hash.slice(1));
-    driveToken = p.get('access_token');
-    history.replaceState(null, '', location.pathname);
+    if (hash.includes('access_token')) {
+        const p = new URLSearchParams(hash.slice(1));
+        const token   = p.get('access_token');
+        const expires = Date.now() + (parseInt(p.get('expires_in') || '3600') - 60) * 1000;
+        driveToken = token;
+        try {
+            sessionStorage.setItem('cartum_tok', token);
+            sessionStorage.setItem('cartum_exp', expires);
+        } catch(e) {}
+        // Clean URL without triggering a reload
+        history.replaceState(null, '', location.pathname + location.search);
+        _driveConnected();
+        // Reopen drawer + Drive section that was open before redirect
+        setTimeout(() => {
+            if (!document.getElementById('drawer').classList.contains('open')) toggleDrawer();
+            const s = document.getElementById('sec-drive');
+            if (!s.classList.contains('expanded')) s.classList.add('expanded');
+        }, 300);
+        return;
+    }
+    // Case 2 – page reload or navigation: restore token from sessionStorage
+    try {
+        const tok = sessionStorage.getItem('cartum_tok');
+        const exp = parseInt(sessionStorage.getItem('cartum_exp') || '0');
+        if (tok && Date.now() < exp) {
+            driveToken = tok;
+            _driveConnected();
+        }
+    } catch(e) {}
+}
+
+function _driveConnected() {
     setDriveStatus('Connecté à Google Drive ✓', 'connected');
     document.getElementById('btnDriveLoad').disabled = false;
     document.getElementById('btnDriveSave').disabled = false;
@@ -1223,13 +1258,18 @@ async function driveLoad() {
     if (!driveToken) { toast('Non connecté'); return; }
     setDriveStatus('Recherche des fichiers…');
     try {
-        // Search SVG and CSV anywhere in Drive (not just root Cartum folder)
         const [svgFiles, csvFiles] = await Promise.all([
             searchDriveByType('.svg'),
             searchDriveByType('.csv')
         ]);
-        const svgFile = svgFiles[0];
-        const csvFile = csvFiles[0];
+
+        // If multiple files, pick the most recently modified (index 0, sorted by modifiedTime desc)
+        const svgFile = svgFiles[0] || null;
+        const csvFile = csvFiles[0] || null;
+
+        // Show what was found in status
+        const foundMsg = `SVG: ${svgFiles.length} trouvé(s), CSV: ${csvFiles.length} trouvé(s)`;
+        setDriveStatus(foundMsg);
 
         if (svgFile) {
             const text = await downloadDriveFile(svgFile.id);
@@ -1244,12 +1284,13 @@ async function driveLoad() {
             toast(`CSV chargé : ${csvFile.name}`);
         }
         if (!svgFile && !csvFile) {
-            toast('Aucun fichier SVG/CSV trouvé sur Drive');
-            setDriveStatus('Aucun fichier trouvé – vérifiez le dépôt Drive', 'error');
+            setDriveStatus('Aucun fichier .svg/.csv trouvé sur ce compte Drive', 'error');
+            toast('Aucun fichier trouvé – vérifiez le scope Drive');
         } else {
-            setDriveStatus(`Fichiers chargés ✓ (${svgFile ? svgFile.name : '—'} / ${csvFile ? csvFile.name : '—'})`, 'connected');
+            setDriveStatus(`✓ ${svgFile ? svgFile.name : '—'} / ${csvFile ? csvFile.name : '—'}`, 'connected');
         }
     } catch(e) {
+        console.error('driveLoad error', e);
         setDriveStatus('Erreur : ' + e.message, 'error');
         toast('Erreur Drive : ' + e.message);
     }
@@ -1308,17 +1349,34 @@ async function driveTest() {
 
 // Drive helpers
 async function searchDriveByType(ext) {
-    // Search ALL of Drive for files with this extension, not limited to one folder
-    const q = encodeURIComponent(`name contains '${ext}' and trashed=false`);
-    const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,mimeType,parents)&orderBy=modifiedTime desc&pageSize=10`, {
+    // Drive API v3: q parameter must NOT be double-encoded.
+    // Use URLSearchParams to encode only the value, not the whole URL.
+    // "name contains 'svg'" works; the dot must be excluded from the contains clause.
+    const extNoDot = ext.replace('.', '');  // 'svg' or 'csv'
+    const params = new URLSearchParams({
+        q: `name contains '${extNoDot}' and trashed = false`,
+        fields: 'files(id,name,mimeType,parents)',
+        orderBy: 'modifiedTime desc',
+        pageSize: '20'
+    });
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
         headers: { Authorization: 'Bearer ' + driveToken }
     });
+    if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(`Drive API ${r.status}: ${err?.error?.message || r.statusText}`);
+    }
     const d = await r.json();
-    return d.files || [];
+    // Filter strictly: file must end with .svg or .csv (not just contain 'svg')
+    return (d.files || []).filter(f => f.name.toLowerCase().endsWith(ext));
 }
 
 async function getOrCreateFolder(name) {
-    const r = await fetch(`https://www.googleapis.com/drive/v3/files?q=name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false&fields=files(id,name)`, {
+    const params = new URLSearchParams({
+        q: `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id,name)'
+    });
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
         headers: { Authorization: 'Bearer ' + driveToken }
     });
     const d = await r.json();
@@ -1334,7 +1392,11 @@ async function getOrCreateFolder(name) {
 }
 
 async function listDriveFiles(folderId) {
-    const r = await fetch(`https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed=false&fields=files(id,name,mimeType)`, {
+    const params = new URLSearchParams({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'files(id,name,mimeType)'
+    });
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
         headers: { Authorization: 'Bearer ' + driveToken }
     });
     const d = await r.json();
