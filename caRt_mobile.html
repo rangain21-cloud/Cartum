@@ -821,8 +821,8 @@ function loadLocalCsv(input) {
         setLocalStatus(`Légende chargée : ${file.name}`, 'ok');
     };
     reader.readAsText(file);
+    input.value = ""; // reset pour permettre de re-sélectionner le même fichier
 }
-    input.value = "";
 function setLocalStatus(msg, cls) {
     const el = document.getElementById('localStatus');
     el.textContent = msg; el.className = 'status-msg ' + (cls || '');
