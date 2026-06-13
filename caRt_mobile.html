@@ -93,11 +93,12 @@
             background: var(--bg-panel);
             border-right: 1px solid var(--border);
             display: flex; flex-direction: column;
-            overflow: clip;
+            overflow-x: hidden;
+            overflow-y: visible;
             transition: width 0.25s cubic-bezier(0.4,0,0.2,1),
                         min-width 0.25s cubic-bezier(0.4,0,0.2,1);
             position: relative;
-            touch-action: pan-y; /* zoom+scroll natif autorisé dans la sidebar */
+            touch-action: pan-y;
         }
         #sidebar.collapsed {
             width: var(--menu-collapsed-w) !important;
@@ -186,7 +187,7 @@
             background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 12px;
-            overflow: hidden;
+            overflow: visible; /* ne jamais couper les boutons */
         }
         .section-header {
             display: flex; align-items: center; gap: 8px;
@@ -202,7 +203,7 @@
             transition: transform 0.25s;
         }
         .section-body {
-            padding: 0 14px 14px;
+            padding: 0 14px 18px;
             display: none;
         }
         .section-card.expanded .section-arrow { transform: rotate(90deg); }
@@ -334,6 +335,7 @@
             cursor: pointer; font-size: 0.82rem; font-weight: 600;
             transition: all 0.2s; display: inline-flex;
             align-items: center; gap: 5px; white-space: nowrap;
+            min-height: 44px; /* cible tactile Android minimale */
         }
         .btn:active { transform: scale(0.97); }
         .btn-primary { background: var(--accent); color: #fff; }
@@ -808,6 +810,7 @@ function loadLocalSvg(input) {
         setLocalStatus(`Carte chargée : ${file.name}`, 'ok');
     };
     reader.readAsText(file);
+    input.value = "";
 }
 function loadLocalCsv(input) {
     const file = input.files[0]; if (!file) return;
@@ -819,6 +822,7 @@ function loadLocalCsv(input) {
     };
     reader.readAsText(file);
 }
+    input.value = "";
 function setLocalStatus(msg, cls) {
     const el = document.getElementById('localStatus');
     el.textContent = msg; el.className = 'status-msg ' + (cls || '');
