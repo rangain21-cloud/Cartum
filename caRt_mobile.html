@@ -98,7 +98,7 @@
             transition: width 0.25s cubic-bezier(0.4,0,0.2,1),
                         min-width 0.25s cubic-bezier(0.4,0,0.2,1);
             position: relative;
-            touch-action: pan-y;
+            touch-action: auto; /* zoom pinch + scroll natifs libres sur la sidebar */
         }
         #sidebar.collapsed {
             width: var(--menu-collapsed-w) !important;
@@ -153,6 +153,7 @@
             display: flex; flex-direction: column; gap: 8px;
             -webkit-overflow-scrolling: touch;
             transition: opacity 0.15s;
+            touch-action: auto; /* pinch-zoom + scroll libres */
         }
         #sidebarScroll::-webkit-scrollbar { width: 3px; }
         #sidebarScroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -476,6 +477,7 @@
             </div>
             <div class="section-body">
                 <div id="driveStatus">Non connecté</div>
+                <div id="driveLog" style="font-size:0.72rem;color:var(--text-muted);background:var(--bg-dark);border-radius:6px;padding:6px 8px;margin-bottom:8px;max-height:80px;overflow-y:auto;display:none;font-family:monospace;line-height:1.5;white-space:pre-wrap"></div>
                 <div class="drive-btns">
                     <button class="btn btn-primary" onclick="driveConnect()">🔗 Connecter</button>
                     <button class="btn btn-muted" id="btnDriveLoad" onclick="driveLoad()" disabled>⬇ Charger depuis Drive</button>
@@ -641,8 +643,9 @@ let activeFilterProprio = null;
 let driveToken = null;
 let driveFileIds = { svg: null, csv: null };
 const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.googleusercontent.com'; // à remplir dans GitHub Pages
-// drive.readonly = read ALL files; drive.file = only files created by this app
-// We need readonly to browse existing user files, + drive.file for write/create
+// drive = accès complet (lecture + écriture + création de dossiers)
+// Nécessite vérification Google pour publication publique,
+// mais fonctionne immédiatement pour les comptes testeurs déclarés dans la console.
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
 const DRIVE_FOLDER = 'Cartum';
 
@@ -1089,16 +1092,15 @@ function updateExportBtn() {
 }
 
 // ── CSV EXPORT ──────────────────────────────────────
-function exportCsv() {
-    if (!csvData) return;
+// ── CONSTRUCTION DU CONTENU CSV (partagée) ──────────
+function buildCsvContent() {
     const headers = ['IdLot', 'IdProprio', 'Image', 'Famille', 'Lieu-dit', 'Cadrage', 'Texte', 'Picture'];
     const rows = csvData.map(r => {
         const nr = {};
         headers.forEach(h => { nr[h] = (h === 'Texte' || h === 'Picture') ? '' : (r[h] || ''); });
         if (commentsData[r.IdLot]) {
-            if (commentsData[r.IdLot].text) {
+            if (commentsData[r.IdLot].text)
                 nr.Texte = commentsData[r.IdLot].text.replace(/"/g, '""').replace(/[\r\n]+/g, ' ');
-            }
             if (commentsData[r.IdLot].picture) nr.Picture = commentsData[r.IdLot].picture;
         }
         return nr;
@@ -1111,14 +1113,53 @@ function exportCsv() {
             return v;
         }).join(',') + '\n';
     });
+    return csv;
+}
+
+// ── EXPORT CSV : local + Drive si connecté ───────────
+async function exportCsv() {
+    if (!csvData) return;
+    const csv      = buildCsvContent();
+    const fileName = originalCsvFileName || 'legende.csv';
+
+    // Téléchargement local (toujours)
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = originalCsvFileName || 'legende.csv';
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = fileName;
     a.click();
     hasUnsaved = false;
     updateExportBtn();
     toast('Fichier CSV téléchargé ✓');
+
+    // Sauvegarde sur Drive en plus, si connecté
+    if (driveToken) {
+        driveLog('Export CSV → Drive démarré…');
+        try {
+            driveLog('  getOrCreateFolder(' + DRIVE_FOLDER + ')…');
+            const folderId = await getOrCreateFolder(DRIVE_FOLDER);
+            driveLog('  folderId=' + folderId);
+            if (driveFileIds.csv) {
+                driveLog('  updateDriveFile(' + driveFileIds.csv + ')…');
+                await updateDriveFile(driveFileIds.csv, csv, 'text/csv');
+                driveLog('  ✓ mise à jour OK');
+            } else {
+                driveLog('  createDriveFile(' + fileName + ')…');
+                driveFileIds.csv = await createDriveFile(folderId, fileName, csv, 'text/csv');
+                driveLog('  ✓ créé id=' + driveFileIds.csv);
+            }
+            toast(`✓ Drive : ${DRIVE_FOLDER}/${fileName} sauvegardé`);
+            setDriveStatus(`✓ CSV mis à jour dans "${DRIVE_FOLDER}"`, 'connected');
+        } catch(e) {
+            console.error('Drive upload error:', e);
+            driveLog('  ✗ ERREUR : ' + e.message);
+            setDriveStatus(`Erreur upload Drive : ${e.message}`, 'error');
+            toast(`⚠ Drive KO : ${e.message}`, 5000);
+        }
+    } else {
+        driveLog('Export CSV : driveToken absent, sauvegarde Drive ignorée');
+        setDriveStatus('⚠ Non connecté – sauvegarde locale uniquement', 'error');
+    }
 }
 
 // ── HIGHLIGHTS ──────────────────────────────────────
@@ -1259,6 +1300,16 @@ function resetFilter() {
     currentIdLot = null;
     updateHeader('');
     updateCommentDisplay();
+    // Réinitialiser la vue carte (position + zoom)
+    resetMapView();
+}
+
+function resetMapView() {
+    if (!svgWrapper) return;
+    xform = { x: 0, y: 0, scale: 1 };
+    svgWrapper.style.transition = 'transform 0.4s cubic-bezier(0.4,0,0.2,1)';
+    applyXform();
+    setTimeout(() => { svgWrapper.style.transition = ''; }, 420);
 }
 
 function searchLot() {
@@ -1307,19 +1358,24 @@ function centerOnElement(el) {
 // ── GOOGLE DRIVE ────────────────────────────────────
 function driveConnect() {
     if (!DRIVE_CLIENT_ID) {
-        toast('Client ID Google non configuré. Voir README.');
-        setDriveStatus('Client ID manquant – configurez le dépôt GitHub', 'error');
+        toast('Client ID Google non configuré.');
+        setDriveStatus('⚠️ DRIVE_CLIENT_ID vide – modifiez le fichier HTML', 'error');
         return;
     }
+    const redirectUri = location.origin + location.pathname;
+    // Afficher l'URI exact 2 secondes avant la redirection pour diagnostic
+    setDriveStatus(`redirect_uri : ${redirectUri}`, '');
     const params = new URLSearchParams({
         client_id: DRIVE_CLIENT_ID,
-        redirect_uri: location.origin + location.pathname,
+        redirect_uri: redirectUri,
         response_type: 'token',
         scope: DRIVE_SCOPE,
         include_granted_scopes: 'true',
         state: 'drive_auth'
     });
-    window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+    setTimeout(() => {
+        window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+    }, 1500);
 }
 
 function checkDriveCallback() {
@@ -1331,32 +1387,48 @@ function checkDriveCallback() {
         const expires = Date.now() + (parseInt(p.get('expires_in') || '3600') - 60) * 1000;
         driveToken = token;
         try {
-            sessionStorage.setItem('cartum_tok', token);
-            sessionStorage.setItem('cartum_exp', expires);
-        } catch(e) {}
-        // Clean URL without triggering a reload
+            // localStorage persiste entre sessions (survit aux mises en veille Android)
+            localStorage.setItem('cartum_tok', token);
+            localStorage.setItem('cartum_exp', String(expires));
+        } catch(e) { driveLog('⚠ localStorage indisponible : ' + e.message); }
         history.replaceState(null, '', location.pathname + location.search);
+        driveLog('✓ Token OAuth reçu, expire dans ' + Math.round((expires - Date.now()) / 60000) + ' min');
         _driveConnected();
-        // Re-expand Drive section after OAuth redirect
         setTimeout(() => { expandSec('sec-drive'); }, 300);
         return;
     }
-    // Case 2 – page reload or navigation: restore token from sessionStorage
+    // Case 2 – restore token from localStorage
     try {
-        const tok = sessionStorage.getItem('cartum_tok');
-        const exp = parseInt(sessionStorage.getItem('cartum_exp') || '0');
+        const tok = localStorage.getItem('cartum_tok');
+        const exp = parseInt(localStorage.getItem('cartum_exp') || '0');
         if (tok && Date.now() < exp) {
             driveToken = tok;
+            driveLog('✓ Token restauré depuis localStorage, expire dans ' + Math.round((exp - Date.now()) / 60000) + ' min');
             _driveConnected();
+        } else if (tok) {
+            driveLog('⚠ Token expiré – reconnecter');
+            localStorage.removeItem('cartum_tok');
+            localStorage.removeItem('cartum_exp');
         }
-    } catch(e) {}
+    } catch(e) { driveLog('⚠ Restore token : ' + e.message); }
 }
 
 function _driveConnected() {
+    _cachedFolderId = null; // reset cache dossier à chaque nouvelle connexion
     setDriveStatus('Connecté à Google Drive ✓', 'connected');
     document.getElementById('btnDriveLoad').disabled = false;
     document.getElementById('btnDriveSave').disabled = false;
     toast('Google Drive connecté ✓');
+}
+
+function driveLog(msg) {
+    const el = document.getElementById('driveLog');
+    if (!el) return;
+    el.style.display = 'block';
+    const ts = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    el.textContent = (el.textContent ? el.textContent + '\n' : '') + ts + ' ' + msg;
+    el.scrollTop = el.scrollHeight;
+    console.log('[Drive]', msg);
 }
 
 function setDriveStatus(msg, cls) {
@@ -1366,93 +1438,161 @@ function setDriveStatus(msg, cls) {
 }
 
 async function driveLoad() {
-    if (!driveToken) { toast('Non connecté'); return; }
-    setDriveStatus('Recherche des fichiers…');
+    if (!driveToken) {
+        driveLog('driveLoad : driveToken absent');
+        toast('Non connecté'); return;
+    }
+    setDriveStatus('Recherche dans Drive…');
+    driveLog(`driveLoad – recherche tous les dossiers "${DRIVE_FOLDER}"…`);
     try {
-        const [svgFiles, csvFiles] = await Promise.all([
-            searchDriveByType('.svg'),
-            searchDriveByType('.csv')
-        ]);
 
-        // If multiple files, pick the most recently modified (index 0, sorted by modifiedTime desc)
-        const svgFile = svgFiles[0] || null;
-        const csvFile = csvFiles[0] || null;
+        // ── Étape 1 : trouver TOUS les dossiers nommés DRIVE_FOLDER ──
+        const folderParams = new URLSearchParams({
+            q: `name = '${DRIVE_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+            corpora: 'user', spaces: 'drive',
+            fields: 'files(id,name)',
+            pageSize: '20'
+        });
+        const folderR = await fetch(`https://www.googleapis.com/drive/v3/files?${folderParams}`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        const folderD = await folderR.json();
+        const folders = folderD.files || [];
+        driveLog(`  ${folders.length} dossier(s) "${DRIVE_FOLDER}" : ${folders.map(f=>f.id).join(' | ') || 'aucun'}`);
 
-        // Show what was found in status
-        const foundMsg = `SVG: ${svgFiles.length} trouvé(s), CSV: ${csvFiles.length} trouvé(s)`;
-        setDriveStatus(foundMsg);
+        if (folders.length === 0) {
+            setDriveStatus(`Dossier "${DRIVE_FOLDER}" introuvable`, 'error');
+            driveLog(`  ✗ Créez un dossier "${DRIVE_FOLDER}" sur Drive avec vos fichiers`);
+            toast(`Dossier "${DRIVE_FOLDER}" introuvable`);
+            return;
+        }
 
+        // ── Étape 2 : inspecter le contenu de chaque dossier ──────
+        let svgFile = null, csvFile = null, realFolderId = null;
+
+        for (const folder of folders) {
+            const listParams = new URLSearchParams({
+                q: `'${folder.id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+                fields: 'files(id,name)',
+                pageSize: '50'
+            });
+            const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, {
+                headers: { Authorization: 'Bearer ' + driveToken }
+            });
+            const listD = await listR.json();
+            const files = listD.files || [];
+            driveLog(`  Dossier id=${folder.id} → ${files.length} fichier(s) : ${files.map(f=>f.name).join(', ') || 'vide'}`);
+
+            const svg = files.find(f => f.name.toLowerCase().endsWith('.svg')) || null;
+            const csv = files.find(f => f.name.toLowerCase().endsWith('.csv')) || null;
+
+            // Priorité : dossier contenant les DEUX fichiers
+            if (svg && csv) {
+                svgFile = svg; csvFile = csv; realFolderId = folder.id;
+                driveLog(`  ✓ Dossier retenu (SVG+CSV) id=${folder.id}`);
+                break;
+            }
+            // Sinon mémoriser en réserve (premier dossier avec au moins un fichier)
+            if ((svg || csv) && !realFolderId) {
+                if (svg) svgFile = svg;
+                if (csv) csvFile = csv;
+                realFolderId = folder.id;
+                driveLog(`  ⚠ Dossier partiel (SVG:${!!svg} CSV:${!!csv}) id=${folder.id}`);
+            }
+        }
+
+        // Mémoriser pour les sauvegardes futures
+        if (realFolderId) {
+            _cachedFolderId = realFolderId;
+            driveLog(`  folderId mémorisé : ${realFolderId}`);
+        }
+
+        // ── Étape 3 : télécharger ─────────────────────────────────
         if (svgFile) {
+            driveLog(`  Téléchargement SVG "${svgFile.name}"…`);
             const text = await downloadDriveFile(svgFile.id);
             svgData = text; driveFileIds.svg = svgFile.id;
             renderSvg();
+            driveLog(`  ✓ SVG chargé (${text.length} octets)`);
             toast(`SVG chargé : ${svgFile.name}`);
         }
         if (csvFile) {
+            driveLog(`  Téléchargement CSV "${csvFile.name}"…`);
             const text = await downloadDriveFile(csvFile.id);
             originalCsvFileName = csvFile.name; driveFileIds.csv = csvFile.id;
             parseCsv(text);
+            driveLog(`  ✓ CSV chargé (${text.length} octets)`);
             toast(`CSV chargé : ${csvFile.name}`);
         }
         if (!svgFile && !csvFile) {
-            setDriveStatus('Aucun fichier .svg/.csv trouvé sur ce compte Drive', 'error');
-            toast('Aucun fichier trouvé – vérifiez le scope Drive');
+            setDriveStatus(`Aucun .svg/.csv dans les dossiers "${DRIVE_FOLDER}"`, 'error');
+            driveLog(`  ✗ Aucun .svg/.csv dans aucun dossier "${DRIVE_FOLDER}"`);
+            toast(`Aucun fichier dans "${DRIVE_FOLDER}"`);
         } else {
             setDriveStatus(`✓ ${svgFile ? svgFile.name : '—'} / ${csvFile ? csvFile.name : '—'}`, 'connected');
         }
+
     } catch(e) {
-        console.error('driveLoad error', e);
+        driveLog(`  ✗ ERREUR : ${e.message}`);
         setDriveStatus('Erreur : ' + e.message, 'error');
         toast('Erreur Drive : ' + e.message);
+        console.error('driveLoad error', e);
     }
 }
 
-async function driveSave() {
-    if (!driveToken) { toast('Non connecté'); return; }
-    if (!csvData) { toast('Aucune légende à sauvegarder'); return; }
-    setDriveStatus('Sauvegarde en cours…');
-    try {
-        const folderId = await getOrCreateFolder(DRIVE_FOLDER);
-        // Build CSV content
-        const headers = ['IdLot', 'IdProprio', 'Image', 'Famille', 'Lieu-dit', 'Cadrage', 'Texte', 'Picture'];
-        const rows = csvData.map(r => {
-            const nr = {};
-            headers.forEach(h => { nr[h] = (h==='Texte'||h==='Picture') ? '' : (r[h]||''); });
-            if (commentsData[r.IdLot]) {
-                if (commentsData[r.IdLot].text) nr.Texte = commentsData[r.IdLot].text.replace(/"/g,'""').replace(/[\r\n]+/g,' ');
-                if (commentsData[r.IdLot].picture) nr.Picture = commentsData[r.IdLot].picture;
-            }
-            return nr;
-        });
-        let csvContent = '\uFEFF' + headers.join(',') + '\n';
-        rows.forEach(r => { csvContent += headers.map(h => { let v=r[h]||''; if(v.includes(',')||v.includes('"')||v.includes('\n'))v='"'+v+'"'; return v; }).join(',') + '\n'; });
 
+async function driveSave() {
+    if (!driveToken) {
+        driveLog('driveSave : driveToken absent – non connecté');
+        toast('Non connecté à Drive'); return;
+    }
+    if (!csvData) { toast('Aucune légende à sauvegarder'); return; }
+    setDriveStatus(`Sauvegarde dans "${DRIVE_FOLDER}"…`);
+    driveLog('driveSave démarré…');
+    try {
+        const csv      = buildCsvContent();
         const fileName = originalCsvFileName || 'legende.csv';
+        driveLog('  getOrCreateFolder(' + DRIVE_FOLDER + ')…');
+        const folderId = await getOrCreateFolder(DRIVE_FOLDER);
+        driveLog('  folderId=' + folderId);
         if (driveFileIds.csv) {
-            await updateDriveFile(driveFileIds.csv, csvContent, 'text/csv');
+            driveLog('  updateDriveFile(' + driveFileIds.csv + ')…');
+            await updateDriveFile(driveFileIds.csv, csv, 'text/csv');
+            driveLog('  ✓ mise à jour OK');
         } else {
-            const id = await createDriveFile(folderId, fileName, csvContent, 'text/csv');
-            driveFileIds.csv = id;
+            driveLog('  createDriveFile(' + fileName + ')…');
+            driveFileIds.csv = await createDriveFile(folderId, fileName, csv, 'text/csv');
+            driveLog('  ✓ créé id=' + driveFileIds.csv);
         }
         hasUnsaved = false; updateExportBtn();
-        setDriveStatus('Sauvegardé sur Drive ✓', 'connected');
-        toast('Fichier CSV sauvegardé sur Drive ✓');
+        setDriveStatus(`✓ "${DRIVE_FOLDER}/${fileName}" sauvegardé`, 'connected');
+        toast('CSV sauvegardé sur Drive ✓');
     } catch(e) {
+        driveLog('  ✗ ERREUR : ' + e.message);
         setDriveStatus('Erreur : ' + e.message, 'error');
         toast('Erreur sauvegarde : ' + e.message);
     }
 }
 
 async function driveTest() {
-    if (!driveToken) { toast('Non connecté à Drive'); return; }
+    if (!driveToken) {
+        driveLog('TEST : driveToken est NULL');
+        toast('Non connecté à Drive'); return;
+    }
+    driveLog('TEST : token présent, appel /about…');
     try {
-        const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+        const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user,storageQuota', {
             headers: { Authorization: 'Bearer ' + driveToken }
         });
         const d = await r.json();
-        toast(`Drive OK – ${d.user?.displayName || 'connecté'}`);
-        setDriveStatus(`Connecté : ${d.user?.emailAddress || 'OK'}`, 'connected');
+        if (!r.ok) throw new Error(`${r.status} ${d?.error?.message}`);
+        const exp = parseInt(localStorage.getItem('cartum_exp') || '0');
+        const minLeft = Math.round((exp - Date.now()) / 60000);
+        driveLog(`✓ Connecté : ${d.user?.emailAddress || '?'} – expire dans ${minLeft} min`);
+        toast(`Drive OK – ${d.user?.displayName || 'connecté'} (${minLeft} min restantes)`);
+        setDriveStatus(`Connecté : ${d.user?.emailAddress || 'OK'} (${minLeft} min)`, 'connected');
     } catch(e) {
+        driveLog('✗ TEST KO : ' + e.message);
         toast('Erreur TEST : ' + e.message);
         setDriveStatus('Erreur TEST Drive', 'error');
     }
@@ -1482,34 +1622,95 @@ async function searchDriveByType(ext) {
     return (d.files || []).filter(f => f.name.toLowerCase().endsWith(ext));
 }
 
+// Mémoïsation du folderId pour éviter des appels répétés
+let _cachedFolderId = null;
+
 async function getOrCreateFolder(name) {
+    // Retourner le cache si disponible
+    if (_cachedFolderId) {
+        driveLog(`  getOrCreateFolder : cache → id=${_cachedFolderId}`);
+        return _cachedFolderId;
+    }
+
+    // Chercher TOUS les dossiers portant ce nom dans My Drive
     const params = new URLSearchParams({
         q: `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-        fields: 'files(id,name)'
+        corpora: 'user',
+        spaces: 'drive',
+        fields: 'files(id,name,parents)'
     });
     const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
         headers: { Authorization: 'Bearer ' + driveToken }
     });
+    if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(`getFolder ${r.status}: ${d?.error?.message || r.statusText}`);
+    }
     const d = await r.json();
-    if (d.files && d.files.length > 0) return d.files[0].id;
-    // create
-    const cr = await fetch('https://www.googleapis.com/drive/v3/files', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + driveToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' })
-    });
-    const cd = await cr.json();
-    return cd.id;
+    const folders = d.files || [];
+    driveLog(`  getOrCreateFolder("${name}") : ${folders.length} dossier(s) trouvé(s)`);
+
+    if (folders.length === 0) {
+        // Créer le dossier à la racine
+        driveLog(`  → dossier "${name}" absent, création à la racine…`);
+        const cr = await fetch('https://www.googleapis.com/drive/v3/files', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + driveToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' })
+        });
+        const cd = await cr.json();
+        if (!cr.ok) throw new Error(`createFolder ${cr.status}: ${cd?.error?.message || cr.statusText}`);
+        driveLog(`  → dossier "${name}" créé id=${cd.id}`);
+        _cachedFolderId = cd.id;
+        return _cachedFolderId;
+    }
+
+    if (folders.length === 1) {
+        driveLog(`  → 1 dossier trouvé id=${folders[0].id}`);
+        _cachedFolderId = folders[0].id;
+        return _cachedFolderId;
+    }
+
+    // Plusieurs dossiers : chercher celui qui contient un .svg ou .csv
+    driveLog(`  → ${folders.length} dossiers "${name}" trouvés, recherche du bon…`);
+    for (const folder of folders) {
+        const p2 = new URLSearchParams({
+            q: `'${folder.id}' in parents and trashed = false and (name contains '.svg' or name contains '.csv')`,
+            fields: 'files(id,name)'
+        });
+        const r2 = await fetch(`https://www.googleapis.com/drive/v3/files?${p2}`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        const d2 = await r2.json();
+        const count = d2.files?.length || 0;
+        driveLog(`    dossier id=${folder.id} : ${count} fichier(s) svg/csv`);
+        if (count > 0) {
+            driveLog(`  → dossier retenu id=${folder.id}`);
+            _cachedFolderId = folder.id;
+            return _cachedFolderId;
+        }
+    }
+
+    // Aucun dossier ne contient de fichiers : prendre le premier
+    driveLog(`  → aucun dossier avec svg/csv, on prend le premier id=${folders[0].id}`);
+    _cachedFolderId = folders[0].id;
+    return _cachedFolderId;
 }
 
 async function listDriveFiles(folderId) {
     const params = new URLSearchParams({
-        q: `'${folderId}' in parents and trashed = false`,
-        fields: 'files(id,name,mimeType)'
+        // Fichiers directs dans ce dossier uniquement (pas les sous-dossiers)
+        q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id,name,mimeType)',
+        pageSize: '50'
     });
     const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
         headers: { Authorization: 'Bearer ' + driveToken }
     });
+    if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(`listDriveFiles ${r.status}: ${d?.error?.message || r.statusText}`);
+    }
     const d = await r.json();
     return d.files || [];
 }
@@ -1532,15 +1733,20 @@ async function createDriveFile(folderId, name, content, mime) {
         body: form
     });
     const d = await r.json();
+    if (!r.ok) throw new Error(`createDriveFile ${r.status}: ${d?.error?.message || r.statusText}`);
     return d.id;
 }
 
 async function updateDriveFile(fileId, content, mime) {
-    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
         method: 'PATCH',
         headers: { Authorization: 'Bearer ' + driveToken, 'Content-Type': mime },
         body: content
     });
+    if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(`updateDriveFile ${r.status}: ${d?.error?.message || r.statusText}`);
+    }
 }
 
 // ── IMAGE MODAL ──────────────────────────────────────
