@@ -489,7 +489,7 @@
                 </div>
                 <div class="divider"></div>
                 <p style="font-size:0.78rem;color:var(--text-muted);line-height:1.4">
-                    Ou charger localement depuis l'appareil :
+                    Ou charger le(s) fichier(s) depuis :
                 </p>
                 <div style="margin-top:8px;display:flex;gap:8px">
                     <button class="btn btn-muted btn-sm btn-full" onclick="document.getElementById('localSvgInput').click()">🗺 Carte SVG</button>
@@ -609,6 +609,18 @@
         <div class="modal-btns">
             <button class="btn btn-success" onclick="confirmAction()">Confirmer</button>
             <button class="btn btn-muted" onclick="document.getElementById('confirmModal').classList.remove('open')">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE SÉLECTION CSV ══════════════════════════ -->
+<div class="modal" id="csvPickerModal">
+    <div class="modal-box">
+        <div class="modal-title">📋 Choisir un fichier CSV</div>
+        <div class="modal-body">Sélectionnez le fichier légende à charger depuis <strong id="csvPickerFolder"></strong> :</div>
+        <div id="csvPickerList" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;margin-bottom:16px"></div>
+        <div class="modal-btns">
+            <button class="btn btn-muted" onclick="document.getElementById('csvPickerModal').classList.remove('open');document.getElementById('csvPickerModal')._reject&&document.getElementById('csvPickerModal')._reject()">Annuler</button>
         </div>
     </div>
 </div>
@@ -1629,11 +1641,8 @@ async function pickCsvFromDrive() {
             return;
         }
 
-        const names = csvFiles.map(f => f.name).join('\n');
-        const choice = prompt(`Plusieurs CSV trouvés dans "${DRIVE_FOLDER}". Copiez le nom exact :\n\n${names}`);
-        if (!choice) { setLocalStatus('', ''); return; }
-        const chosen = csvFiles.find(f => f.name === choice.trim());
-        if (!chosen) { toast('Nom non reconnu'); setLocalStatus('', ''); return; }
+        const chosen = await pickCsvModal(csvFiles);
+        if (!chosen) { setLocalStatus('', ''); return; }
 
         setLocalStatus(`Chargement ${chosen.name}…`, '');
         const text = await downloadDriveFile(chosen.id);
@@ -1649,6 +1658,33 @@ async function pickCsvFromDrive() {
         setLocalStatus('Erreur Drive', 'error');
         document.getElementById('localCsvInput').click();
     }
+}
+
+// ── Modale de sélection CSV ────────────────────────────────────────
+function pickCsvModal(files) {
+    return new Promise((resolve, reject) => {
+        const modal  = document.getElementById('csvPickerModal');
+        const list   = document.getElementById('csvPickerList');
+        const folder = document.getElementById('csvPickerFolder');
+
+        folder.textContent = DRIVE_FOLDER;
+        list.innerHTML = '';
+
+        files.forEach(f => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-muted';
+            btn.style.cssText = 'width:100%;text-align:left;padding:10px 14px;font-size:0.9rem;border-radius:10px;';
+            btn.textContent = '📄 ' + f.name;
+            btn.onclick = () => {
+                modal.classList.remove('open');
+                resolve(f);
+            };
+            list.appendChild(btn);
+        });
+
+        modal._reject = () => resolve(null);
+        modal.classList.add('open');
+    });
 }
 
 async function driveSave() {
