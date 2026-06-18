@@ -1437,14 +1437,11 @@ async function driveLoad() {
     try {
 
         // ── Étape 1 : trouver TOUS les dossiers nommés DRIVE_FOLDER ──
-        // includeItemsFromAllDrives + corpora=allDrives → cherche aussi les dossiers partagés
+        // Recherche dans Mon Drive (spaces=drive, compatible comptes Gmail)
         const folderParams = new URLSearchParams({
             q: `name = '${DRIVE_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-            corpora: 'allDrives',
-            includeItemsFromAllDrives: 'true',
-            supportsAllDrives: 'true',
             spaces: 'drive',
-            fields: 'files(id,name,driveId)',
+            fields: 'files(id,name)',
             pageSize: '20'
         });
         const folderR = await fetch(`https://www.googleapis.com/drive/v3/files?${folderParams}`, {
@@ -1467,8 +1464,6 @@ async function driveLoad() {
         for (const folder of folders) {
             const listParams = new URLSearchParams({
                 q: `'${folder.id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
-                includeItemsFromAllDrives: 'true',
-                supportsAllDrives: 'true',
                 fields: 'files(id,name)',
                 pageSize: '50'
             });
@@ -1638,9 +1633,6 @@ async function getOrCreateFolder(name) {
     // Chercher TOUS les dossiers portant ce nom dans My Drive
     const params = new URLSearchParams({
         q: `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-        corpora: 'allDrives',
-        includeItemsFromAllDrives: 'true',
-        supportsAllDrives: 'true',
         spaces: 'drive',
         fields: 'files(id,name,parents)'
     });
@@ -1704,10 +1696,7 @@ async function getOrCreateFolder(name) {
 
 async function listDriveFiles(folderId) {
     const params = new URLSearchParams({
-        // Fichiers directs dans ce dossier uniquement (pas les sous-dossiers)
         q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
-        includeItemsFromAllDrives: 'true',
-        supportsAllDrives: 'true',
         fields: 'files(id,name,mimeType)',
         pageSize: '50'
     });
@@ -1734,7 +1723,7 @@ async function createDriveFile(folderId, name, content, mime) {
     const form = new FormData();
     form.append('metadata', new Blob([meta], { type: 'application/json' }));
     form.append('file', new Blob([content], { type: mime }));
-    const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
+    const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + driveToken },
         body: form
@@ -1745,7 +1734,7 @@ async function createDriveFile(folderId, name, content, mime) {
 }
 
 async function updateDriveFile(fileId, content, mime) {
-    const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&supportsAllDrives=true`, {
+    const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
         method: 'PATCH',
         headers: { Authorization: 'Bearer ' + driveToken, 'Content-Type': mime },
         body: content
