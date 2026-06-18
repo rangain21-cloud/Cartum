@@ -496,7 +496,7 @@
                     <button class="btn btn-muted btn-sm btn-full" onclick="document.getElementById('localCsvInput').click()">📋 Légende CSV</button>
                 </div>
                 <input type="file" id="localSvgInput" accept=".svg" onchange="loadLocalSvg(this)">
-                <input type="file" id="localCsvInput" accept=".csv,text/csv,text/plain,application/csv,application/vnd.ms-excel" onchange="loadLocalCsv(this)">
+                <input type="file" id="localCsvInput" accept="*/*" onchange="loadLocalCsv(this)">
                 <div id="localStatus" class="status-msg" style="margin-top:6px"></div>
             </div>
         </div>
