@@ -1540,96 +1540,7 @@ async function driveLoad() {
 }
 
 
-// ── Sélecteur CSV Drive : contourne le sélecteur Android ──────────
-async function pickCsvFromDrive() {
-    // Si pas connecté à Drive → fallback sélecteur local
-    if (!driveToken) {
-        document.getElementById('localCsvInput').click();
-        return;
-    }
-    try {
-        setLocalStatus('Recherche CSV sur Drive…', '');
-        // Lister tous les fichiers du dossier Cartum
-        const folderId = _cachedFolderId || await (async () => {
-            const p = new URLSearchParams({
-                q: `name = '${DRIVE_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-                spaces: 'drive', fields: 'files(id)', pageSize: '5'
-            });
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files?${p}`, {
-                headers: { Authorization: 'Bearer ' + driveToken }
-            });
-            const d = await r.json();
-            return d.files?.[0]?.id || null;
-        })();
-
-        if (!folderId) {
-            toast(`Dossier "${DRIVE_FOLDER}" introuvable`);
-            setLocalStatus('', '');
-            return;
-        }
-
-        // Lister tous les fichiers (sans filtre mimeType — inclut tous les CSV quelle que soit leur type MIME)
-        const listP = new URLSearchParams({
-            q: `'${folderId}' in parents and trashed = false`,
-            fields: 'files(id,name,mimeType)',
-            pageSize: '50'
-        });
-        const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listP}`, {
-            headers: { Authorization: 'Bearer ' + driveToken }
-        });
-        const listD = await listR.json();
-        const allFiles = listD.files || [];
-
-        // Garder uniquement les fichiers CSV (par nom ou mimeType)
-        const csvFiles = allFiles.filter(f =>
-            f.name.toLowerCase().endsWith('.csv') ||
-            f.mimeType === 'text/csv' ||
-            f.mimeType === 'text/plain' ||
-            f.mimeType === 'application/vnd.ms-excel' ||
-            f.mimeType === 'application/octet-stream'
-        );
-
-        if (csvFiles.length === 0) {
-            toast(`Aucun CSV dans "${DRIVE_FOLDER}"`);
-            setLocalStatus('Aucun CSV trouvé sur Drive', 'error');
-            return;
-        }
-
-        // Si un seul fichier CSV → le charger directement
-        if (csvFiles.length === 1) {
-            setLocalStatus(`Chargement ${csvFiles[0].name}…`, '');
-            const text = await downloadDriveFile(csvFiles[0].id);
-            originalCsvFileName = csvFiles[0].name;
-            driveFileIds.csv = csvFiles[0].id;
-            parseCsv(text);
-            setLocalStatus(`✓ ${csvFiles[0].name} chargé depuis Drive`, 'ok');
-            toast(`CSV chargé : ${csvFiles[0].name}`);
-            return;
-        }
-
-        // Plusieurs CSV → afficher un choix simple
-        const names = csvFiles.map(f => f.name).join('\n');
-        const choice = prompt(`Plusieurs CSV trouvés dans "${DRIVE_FOLDER}". Copiez le nom exact :\n\n${names}`);
-        if (!choice) { setLocalStatus('', ''); return; }
-        const chosen = csvFiles.find(f => f.name === choice.trim());
-        if (!chosen) { toast('Nom non reconnu'); setLocalStatus('', ''); return; }
-
-        setLocalStatus(`Chargement ${chosen.name}…`, '');
-        const text = await downloadDriveFile(chosen.id);
-        originalCsvFileName = chosen.name;
-        driveFileIds.csv = chosen.id;
-        parseCsv(text);
-        setLocalStatus(`✓ ${chosen.name} chargé depuis Drive`, 'ok');
-        toast(`CSV chargé : ${chosen.name}`);
-
-    } catch(e) {
-        console.error('pickCsvFromDrive error:', e);
-        toast('Erreur Drive CSV : ' + e.message);
-        setLocalStatus('Erreur Drive', 'error');
-        // Fallback sélecteur local
-        document.getElementById('localCsvInput').click();
-    }
-}
+async function _driveUploadCsv(csv, fileName) {
     driveLog('Upload CSV vers Drive…');
     try {
         driveLog('  getOrCreateFolder(' + DRIVE_FOLDER + ')…');
@@ -1652,6 +1563,91 @@ async function pickCsvFromDrive() {
         setDriveStatus('Erreur upload : ' + e.message, 'error');
         toast(`⚠ Drive KO : ${e.message}`, 5000);
         console.error('Drive upload error:', e);
+    }
+}
+
+// ── Sélecteur CSV Drive : contourne le sélecteur Android ──────────
+async function pickCsvFromDrive() {
+    // Si pas connecté à Drive → fallback sélecteur local
+    if (!driveToken) {
+        document.getElementById('localCsvInput').click();
+        return;
+    }
+    try {
+        setLocalStatus('Recherche CSV sur Drive…', '');
+        const folderId = _cachedFolderId || await (async () => {
+            const p = new URLSearchParams({
+                q: `name = '${DRIVE_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+                spaces: 'drive', fields: 'files(id)', pageSize: '5'
+            });
+            const r = await fetch(`https://www.googleapis.com/drive/v3/files?${p}`, {
+                headers: { Authorization: 'Bearer ' + driveToken }
+            });
+            const d = await r.json();
+            return d.files?.[0]?.id || null;
+        })();
+
+        if (!folderId) {
+            toast(`Dossier "${DRIVE_FOLDER}" introuvable`);
+            setLocalStatus('', '');
+            return;
+        }
+
+        const listP = new URLSearchParams({
+            q: `'${folderId}' in parents and trashed = false`,
+            fields: 'files(id,name,mimeType)',
+            pageSize: '50'
+        });
+        const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listP}`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        const listD = await listR.json();
+        const allFiles = listD.files || [];
+
+        const csvFiles = allFiles.filter(f =>
+            f.name.toLowerCase().endsWith('.csv') ||
+            f.mimeType === 'text/csv' ||
+            f.mimeType === 'text/plain' ||
+            f.mimeType === 'application/vnd.ms-excel' ||
+            f.mimeType === 'application/octet-stream'
+        );
+
+        if (csvFiles.length === 0) {
+            toast(`Aucun CSV dans "${DRIVE_FOLDER}"`);
+            setLocalStatus('Aucun CSV trouvé sur Drive', 'error');
+            return;
+        }
+
+        if (csvFiles.length === 1) {
+            setLocalStatus(`Chargement ${csvFiles[0].name}…`, '');
+            const text = await downloadDriveFile(csvFiles[0].id);
+            originalCsvFileName = csvFiles[0].name;
+            driveFileIds.csv = csvFiles[0].id;
+            parseCsv(text);
+            setLocalStatus(`✓ ${csvFiles[0].name} chargé depuis Drive`, 'ok');
+            toast(`CSV chargé : ${csvFiles[0].name}`);
+            return;
+        }
+
+        const names = csvFiles.map(f => f.name).join('\n');
+        const choice = prompt(`Plusieurs CSV trouvés dans "${DRIVE_FOLDER}". Copiez le nom exact :\n\n${names}`);
+        if (!choice) { setLocalStatus('', ''); return; }
+        const chosen = csvFiles.find(f => f.name === choice.trim());
+        if (!chosen) { toast('Nom non reconnu'); setLocalStatus('', ''); return; }
+
+        setLocalStatus(`Chargement ${chosen.name}…`, '');
+        const text = await downloadDriveFile(chosen.id);
+        originalCsvFileName = chosen.name;
+        driveFileIds.csv = chosen.id;
+        parseCsv(text);
+        setLocalStatus(`✓ ${chosen.name} chargé depuis Drive`, 'ok');
+        toast(`CSV chargé : ${chosen.name}`);
+
+    } catch(e) {
+        console.error('pickCsvFromDrive error:', e);
+        toast('Erreur Drive CSV : ' + e.message);
+        setLocalStatus('Erreur Drive', 'error');
+        document.getElementById('localCsvInput').click();
     }
 }
 
