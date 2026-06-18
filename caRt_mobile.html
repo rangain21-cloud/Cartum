@@ -493,7 +493,7 @@
                 </p>
                 <div style="margin-top:8px;display:flex;gap:8px">
                     <button class="btn btn-muted btn-sm btn-full" onclick="document.getElementById('localSvgInput').click()">🗺 Carte SVG</button>
-                    <button class="btn btn-muted btn-sm btn-full" onclick="pickCsvFromDrive()">📋 Légende CSV</button>
+                    <button class="btn btn-muted btn-sm btn-full" onclick="openCsvSourcePicker()">📋 Légende CSV</button>
                 </div>
                 <input type="file" id="localSvgInput" accept=".svg" onchange="loadLocalSvg(this)">
                 <input type="file" id="localCsvInput" accept=".csv,.txt,text/csv,text/plain,text/comma-separated-values" onchange="loadLocalCsv(this)" style="display:none">
@@ -609,6 +609,25 @@
         <div class="modal-btns">
             <button class="btn btn-success" onclick="confirmAction()">Confirmer</button>
             <button class="btn btn-muted" onclick="document.getElementById('confirmModal').classList.remove('open')">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE SOURCE CSV ══════════════════════════════ -->
+<div class="modal" id="csvSourceModal">
+    <div class="modal-box">
+        <div class="modal-title">📋 Charger la légende CSV</div>
+        <div class="modal-body">Choisissez la source du fichier :</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+            <button class="btn btn-primary" style="width:100%;text-align:left;padding:12px 16px" onclick="closeCsvSourceModal();document.getElementById('localCsvInput').click()">
+                📂 Fichier local (appareil, USB, Drive…)
+            </button>
+            <button class="btn btn-muted" id="csvSourceDriveBtn" style="width:100%;text-align:left;padding:12px 16px" onclick="closeCsvSourceModal();pickCsvFromDrive()">
+                ☁️ Google Drive — dossier <strong id="csvSourceFolderName"></strong>
+            </button>
+        </div>
+        <div class="modal-btns">
+            <button class="btn btn-muted" onclick="closeCsvSourceModal()">Annuler</button>
         </div>
     </div>
 </div>
@@ -1658,6 +1677,23 @@ async function pickCsvFromDrive() {
         setLocalStatus('Erreur Drive', 'error');
         document.getElementById('localCsvInput').click();
     }
+}
+
+// ── Choix de la source CSV ─────────────────────────────────────────
+function openCsvSourcePicker() {
+    const modal = document.getElementById('csvSourceModal');
+    const driveBtn = document.getElementById('csvSourceDriveBtn');
+    const folderName = document.getElementById('csvSourceFolderName');
+    // Afficher le nom du dossier Drive
+    folderName.textContent = DRIVE_FOLDER || 'Cartum';
+    // Griser le bouton Drive si non connecté
+    driveBtn.disabled = !driveToken;
+    driveBtn.style.opacity = driveToken ? '1' : '0.4';
+    driveBtn.title = driveToken ? '' : 'Connectez-vous à Drive d\'abord';
+    modal.classList.add('open');
+}
+function closeCsvSourceModal() {
+    document.getElementById('csvSourceModal').classList.remove('open');
 }
 
 // ── Modale de sélection CSV ────────────────────────────────────────
