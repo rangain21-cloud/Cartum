@@ -675,6 +675,42 @@
     </div>
 </div>
 
+<!-- ══ MODALE RAPPEL POPULATION ══════════════════════ -->
+<div class="modal" id="popModal">
+    <div class="modal-box" style="max-width:340px">
+        <div class="modal-title">👥 Geneanet ouvert dans un nouvel onglet</div>
+        <div class="modal-body" style="margin-bottom:14px">
+            Copiez les valeurs ci-dessous et collez-les dans le formulaire Geneanet&nbsp;:
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+            <div style="background:var(--bg-dark);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:2px">Lieu</div>
+                    <div id="popModalLieu" style="font-size:0.95rem;font-weight:600;color:var(--accent)"></div>
+                </div>
+                <button class="btn btn-muted btn-sm" onclick="copyPopValue('popModalLieu')" title="Copier">📋</button>
+            </div>
+            <div style="background:var(--bg-dark);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:2px">Année début</div>
+                    <div id="popModalAnDeb" style="font-size:0.95rem;font-weight:600;color:var(--accent)"></div>
+                </div>
+                <button class="btn btn-muted btn-sm" onclick="copyPopValue('popModalAnDeb')" title="Copier">📋</button>
+            </div>
+            <div style="background:var(--bg-dark);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:2px">Année fin</div>
+                    <div id="popModalAnFin" style="font-size:0.95rem;font-weight:600;color:var(--accent)"></div>
+                </div>
+                <button class="btn btn-muted btn-sm" onclick="copyPopValue('popModalAnFin')" title="Copier">📋</button>
+            </div>
+        </div>
+        <div class="modal-btns">
+            <button class="btn btn-primary" onclick="closePopModal()">Fermer</button>
+        </div>
+    </div>
+</div>
+
 <!-- ══ TOAST ════════════════════════════════════════ -->
 <div id="toast"></div>
 
@@ -1982,27 +2018,29 @@ function openPopulation() {
 
     if (!lieu) { toast('Veuillez saisir un lieu'); return; }
 
-    // Paramètres de l'URL Geneanet (recherche avancée par événement)
-    const params = new URLSearchParams({
-        lang: 'fr',
-        m: 'H',
-        v: 'search_event',
-        t: 'S',       // onglet Événement
-        x: 'S',       // sexe : Indifférent
-        ma: '0',      // mariés : Indifférent
-        p: lieu,      // Lieu
-        evt_naiss: '1',
-        evt_bapt:  '1',
-        evt_union: '1',
-        evt_deces: '1',
-        evt_inhum: '1',
-        evt_autre: '1',
-    });
-    if (anDeb) params.set('da', anDeb);
-    if (anFin) params.set('db', anFin);
+    // Ouvrir Geneanet dans un nouvel onglet
+    window.open('https://gw.geneanet.org/pract_w?lang=fr&m=H&v=search_event', '_blank', 'noopener');
 
-    const url = 'https://gw.geneanet.org/pract_w?' + params.toString();
-    window.open(url, '_blank', 'noopener');
+    // Afficher la modale rappel avec les valeurs a copier
+    document.getElementById('popModalLieu').textContent  = lieu;
+    document.getElementById('popModalAnDeb').textContent = anDeb || '—';
+    document.getElementById('popModalAnFin').textContent = anFin || '—';
+    document.getElementById('popModal').classList.add('open');
+}
+
+function closePopModal() {
+    document.getElementById('popModal').classList.remove('open');
+}
+
+function copyPopValue(id) {
+    const val = document.getElementById(id).textContent;
+    if (val === '—') return;
+    navigator.clipboard.writeText(val).then(() => toast('Copie : ' + val)).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = val; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        toast('Copie : ' + val);
+    });
 }
 
 // ── INIT ─────────────────────────────────────────────
