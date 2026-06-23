@@ -675,6 +675,20 @@
     </div>
 </div>
 
+<!-- ══ MODALE CHOIX FICHIERS DRIVE ═══════════════════ -->
+<div class="modal" id="drivePickerModal">
+    <div class="modal-box" style="max-width:400px">
+        <div class="modal-title" style="color:var(--accent3)">☁️ Choisir les fichiers à charger</div>
+        <div class="modal-body">
+            Sélectionnez une paire SVG + CSV cohérente depuis votre dossier <strong>Cartum</strong>&nbsp;:
+        </div>
+        <div id="drivePickerList" style="display:flex;flex-direction:column;gap:10px;max-height:55vh;overflow-y:auto;margin-bottom:16px"></div>
+        <div class="modal-btns">
+            <button class="btn btn-sm" style="background:var(--accent3);color:#000;font-weight:600" onclick="closeDrivePickerModal()">Annuler</button>
+        </div>
+    </div>
+</div>
+
 <!-- ══ MODALE RAPPEL POPULATION ══════════════════════ -->
 <div class="modal" id="popModal">
     <div class="modal-box" style="max-width:340px">
@@ -1541,21 +1555,17 @@ async function driveLoad() {
     setDriveStatus('Recherche dans Drive…');
     driveLog(`driveLoad – recherche tous les dossiers "${DRIVE_FOLDER}"…`);
     try {
-
         // ── Étape 1 : trouver TOUS les dossiers nommés DRIVE_FOLDER ──
-        // Recherche dans Mon Drive (spaces=drive, compatible comptes Gmail)
         const folderParams = new URLSearchParams({
             q: `name = '${DRIVE_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-            spaces: 'drive',
-            fields: 'files(id,name)',
-            pageSize: '20'
+            spaces: 'drive', fields: 'files(id,name)', pageSize: '20'
         });
         const folderR = await fetch(`https://www.googleapis.com/drive/v3/files?${folderParams}`, {
             headers: { Authorization: 'Bearer ' + driveToken }
         });
         const folderD = await folderR.json();
         const folders = folderD.files || [];
-        driveLog(`  ${folders.length} dossier(s) "${DRIVE_FOLDER}" : ${folders.map(f=>f.id).join(' | ') || 'aucun'}`);
+        driveLog(`  ${folders.length} dossier(s) "${DRIVE_FOLDER}"`);
 
         if (folders.length === 0) {
             setDriveStatus(`Dossier "${DRIVE_FOLDER}" introuvable`, 'error');
@@ -1564,70 +1574,61 @@ async function driveLoad() {
             return;
         }
 
-        // ── Étape 2 : inspecter le contenu de chaque dossier ──────
-        let svgFile = null, csvFile = null, realFolderId = null;
+        // ── Étape 2 : collecter tous les SVG et CSV de tous les dossiers ──
+        let allSvgFiles = [], allCsvFiles = [], realFolderId = null;
 
         for (const folder of folders) {
             const listParams = new URLSearchParams({
                 q: `'${folder.id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
-                fields: 'files(id,name)',
-                pageSize: '50'
+                fields: 'files(id,name)', pageSize: '50'
             });
             const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, {
                 headers: { Authorization: 'Bearer ' + driveToken }
             });
             const listD = await listR.json();
             const files = listD.files || [];
-            driveLog(`  Dossier id=${folder.id} → ${files.length} fichier(s) : ${files.map(f=>f.name).join(', ') || 'vide'}`);
+            driveLog(`  Dossier id=${folder.id} → ${files.map(f=>f.name).join(', ') || 'vide'}`);
 
-            const svg = files.find(f => f.name.toLowerCase().endsWith('.svg')) || null;
-            const csv = files.find(f => f.name.toLowerCase().endsWith('.csv')) || null;
-
-            // Priorité : dossier contenant les DEUX fichiers
-            if (svg && csv) {
-                svgFile = svg; csvFile = csv; realFolderId = folder.id;
-                driveLog(`  ✓ Dossier retenu (SVG+CSV) id=${folder.id}`);
-                break;
-            }
-            // Sinon mémoriser en réserve (premier dossier avec au moins un fichier)
-            if ((svg || csv) && !realFolderId) {
-                if (svg) svgFile = svg;
-                if (csv) csvFile = csv;
+            files.forEach(f => {
+                const lc = f.name.toLowerCase();
+                if (lc.endsWith('.svg')) allSvgFiles.push({ ...f, folderId: folder.id });
+                if (lc.endsWith('.csv')) allCsvFiles.push({ ...f, folderId: folder.id });
+            });
+            if (!realFolderId && (files.some(f=>f.name.toLowerCase().endsWith('.svg')) || files.some(f=>f.name.toLowerCase().endsWith('.csv')))) {
                 realFolderId = folder.id;
-                driveLog(`  ⚠ Dossier partiel (SVG:${!!svg} CSV:${!!csv}) id=${folder.id}`);
             }
         }
 
-        // Mémoriser pour les sauvegardes futures
-        if (realFolderId) {
-            _cachedFolderId = realFolderId;
-            driveLog(`  folderId mémorisé : ${realFolderId}`);
+        if (realFolderId) { _cachedFolderId = realFolderId; }
+
+        if (allSvgFiles.length === 0 && allCsvFiles.length === 0) {
+            setDriveStatus(`Aucun .svg/.csv dans "${DRIVE_FOLDER}"`, 'error');
+            toast(`Aucun fichier dans "${DRIVE_FOLDER}"`);
+            return;
         }
 
-        // ── Étape 3 : télécharger ─────────────────────────────────
-        if (svgFile) {
-            driveLog(`  Téléchargement SVG "${svgFile.name}"…`);
-            const text = await downloadDriveFile(svgFile.id);
-            svgData = text; driveFileIds.svg = svgFile.id;
+        // ── Étape 3 : afficher la modale de choix ─────────────────
+        const chosen = await drivePickerModal(allSvgFiles, allCsvFiles);
+        if (!chosen) { setDriveStatus('Chargement annulé', ''); return; }
+
+        // ── Étape 4 : télécharger les fichiers choisis ─────────────
+        if (chosen.svg) {
+            driveLog(`  Téléchargement SVG "${chosen.svg.name}"…`);
+            const text = await downloadDriveFile(chosen.svg.id);
+            svgData = text; driveFileIds.svg = chosen.svg.id;
             renderSvg();
             driveLog(`  ✓ SVG chargé (${text.length} octets)`);
-            toast(`SVG chargé : ${svgFile.name}`);
+            toast(`SVG chargé : ${chosen.svg.name}`);
         }
-        if (csvFile) {
-            driveLog(`  Téléchargement CSV "${csvFile.name}"…`);
-            const text = await downloadDriveFile(csvFile.id);
-            originalCsvFileName = csvFile.name; driveFileIds.csv = csvFile.id;
+        if (chosen.csv) {
+            driveLog(`  Téléchargement CSV "${chosen.csv.name}"…`);
+            const text = await downloadDriveFile(chosen.csv.id);
+            originalCsvFileName = chosen.csv.name; driveFileIds.csv = chosen.csv.id;
             parseCsv(text);
             driveLog(`  ✓ CSV chargé (${text.length} octets)`);
-            toast(`CSV chargé : ${csvFile.name}`);
+            toast(`CSV chargé : ${chosen.csv.name}`);
         }
-        if (!svgFile && !csvFile) {
-            setDriveStatus(`Aucun .svg/.csv dans les dossiers "${DRIVE_FOLDER}"`, 'error');
-            driveLog(`  ✗ Aucun .svg/.csv dans aucun dossier "${DRIVE_FOLDER}"`);
-            toast(`Aucun fichier dans "${DRIVE_FOLDER}"`);
-        } else {
-            setDriveStatus(`✓ ${svgFile ? svgFile.name : '—'} / ${csvFile ? csvFile.name : '—'}`, 'connected');
-        }
+        setDriveStatus(`✓ ${chosen.svg ? chosen.svg.name : '—'} / ${chosen.csv ? chosen.csv.name : '—'}`, 'connected');
 
     } catch(e) {
         driveLog(`  ✗ ERREUR : ${e.message}`);
@@ -1635,6 +1636,87 @@ async function driveLoad() {
         toast('Erreur Drive : ' + e.message);
         console.error('driveLoad error', e);
     }
+}
+
+// ── Modale de choix SVG + CSV depuis Drive ──────────────────────────
+function drivePickerModal(svgFiles, csvFiles) {
+    return new Promise(resolve => {
+        const modal = document.getElementById('drivePickerModal');
+        const list  = document.getElementById('drivePickerList');
+        list.innerHTML = '';
+
+        // Construire les paires par nom de base (sans extension)
+        const base = name => name.replace(/\.[^.]+$/, '').toLowerCase();
+        const allBases = [...new Set([
+            ...svgFiles.map(f => base(f.name)),
+            ...csvFiles.map(f => base(f.name))
+        ])].sort();
+
+        allBases.forEach(b => {
+            const svg = svgFiles.find(f => base(f.name) === b) || null;
+            const csv = csvFiles.find(f => base(f.name) === b) || null;
+
+            const card = document.createElement('div');
+            card.style.cssText = `
+                background: var(--bg-dark);
+                border-radius: 10px;
+                padding: 12px 14px;
+                cursor: pointer;
+                border: 2px solid transparent;
+                transition: border-color .15s;
+            `;
+            card.onmouseenter = () => card.style.borderColor = 'var(--accent3)';
+            card.onmouseleave = () => card.style.borderColor = 'transparent';
+
+            const title = document.createElement('div');
+            title.style.cssText = 'font-weight:700;font-size:0.92rem;color:var(--accent3);margin-bottom:6px';
+            title.textContent = '📁 ' + b;
+            card.appendChild(title);
+
+            const tags = document.createElement('div');
+            tags.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+
+            if (svg) {
+                const t = document.createElement('span');
+                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#adf';
+                t.textContent = '🗺 ' + svg.name;
+                tags.appendChild(t);
+            } else {
+                const t = document.createElement('span');
+                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:var(--text-muted);opacity:.5';
+                t.textContent = '🗺 (pas de SVG)';
+                tags.appendChild(t);
+            }
+            if (csv) {
+                const t = document.createElement('span');
+                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#afd';
+                t.textContent = '📋 ' + csv.name;
+                tags.appendChild(t);
+            } else {
+                const t = document.createElement('span');
+                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:var(--text-muted);opacity:.5';
+                t.textContent = '📋 (pas de CSV)';
+                tags.appendChild(t);
+            }
+            card.appendChild(tags);
+
+            card.addEventListener('click', () => {
+                modal.classList.remove('open');
+                resolve({ svg, csv });
+            });
+            list.appendChild(card);
+        });
+
+        // Si un seul fichier isolé (pas de paire), l'afficher quand même
+        modal._cancelCb = () => resolve(null);
+        modal.classList.add('open');
+    });
+}
+
+function closeDrivePickerModal() {
+    const modal = document.getElementById('drivePickerModal');
+    modal.classList.remove('open');
+    if (modal._cancelCb) modal._cancelCb();
 }
 
 
