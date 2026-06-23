@@ -467,6 +467,7 @@
         <button class="ci-btn" title="Google Drive" onclick="toggleSidebar();expandSec('sec-drive')">☁️</button>
         <button class="ci-btn" title="Filtrer" onclick="toggleSidebar();expandSec('sec-filter')">🔍</button>
         <button class="ci-btn" title="Infos lot" onclick="toggleSidebar();expandSec('sec-info')">📌</button>
+        <button class="ci-btn" title="Population" onclick="toggleSidebar();expandSec('sec-population')">👥</button>
     </div>
 
     <div id="sidebarScroll">
@@ -575,6 +576,36 @@
 
                 <button class="btn btn-success btn-full" id="btnExport" style="margin-top:10px" disabled onclick="exportCsv()">
                     💾 Sauvegarder le fichier CSV
+                </button>
+            </div>
+        </div>
+
+        <!-- ── D) POPULATION (GENEANET) ───────── -->
+        <div class="section-card" id="sec-population">
+            <div class="section-header" onclick="toggleSection('sec-population')">
+                <span class="section-icon">👥</span>
+                <span class="section-title">Population</span>
+                <span class="section-arrow">▶</span>
+            </div>
+            <div class="section-body">
+                <p style="font-size:0.78rem;color:var(--text-muted);line-height:1.4;margin-bottom:10px">
+                    Recherche sur Geneanet par lieu et période.
+                </p>
+                <label style="font-size:0.78rem;color:var(--text-muted)">Lieu</label>
+                <input type="text" id="popLieu" class="search-input" placeholder="ex : La Frasse" style="margin-bottom:8px;width:100%;box-sizing:border-box">
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+                    <div style="flex:1">
+                        <label style="font-size:0.78rem;color:var(--text-muted)">Année début</label>
+                        <input type="number" id="popAnDeb" class="search-input" placeholder="ex : 1680" style="width:100%;box-sizing:border-box">
+                    </div>
+                    <div style="font-size:1rem;color:var(--text-muted);margin-top:16px">→</div>
+                    <div style="flex:1">
+                        <label style="font-size:0.78rem;color:var(--text-muted)">Année fin</label>
+                        <input type="number" id="popAnFin" class="search-input" placeholder="ex : 1730" style="width:100%;box-sizing:border-box">
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-full" onclick="openPopulation()">
+                    🔎 Rechercher dans l'arbre
                 </button>
             </div>
         </div>
@@ -1941,6 +1972,37 @@ function toast(msg, dur = 2800) {
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// ── POPULATION (GENEANET) ────────────────────────────
+function openPopulation() {
+    const lieu  = (document.getElementById('popLieu').value || '').trim();
+    const anDeb = (document.getElementById('popAnDeb').value || '').trim();
+    const anFin = (document.getElementById('popAnFin').value || '').trim();
+
+    if (!lieu) { toast('Veuillez saisir un lieu'); return; }
+
+    // Paramètres de l'URL Geneanet (recherche avancée par événement)
+    const params = new URLSearchParams({
+        lang: 'fr',
+        m: 'H',
+        v: 'search_event',
+        t: 'S',       // onglet Événement
+        x: 'S',       // sexe : Indifférent
+        ma: '0',      // mariés : Indifférent
+        p: lieu,      // Lieu
+        evt_naiss: '1',
+        evt_bapt:  '1',
+        evt_union: '1',
+        evt_deces: '1',
+        evt_inhum: '1',
+        evt_autre: '1',
+    });
+    if (anDeb) params.set('da', anDeb);
+    if (anFin) params.set('db', anFin);
+
+    const url = 'https://gw.geneanet.org/pract_w?' + params.toString();
+    window.open(url, '_blank', 'noopener');
 }
 
 // ── INIT ─────────────────────────────────────────────
