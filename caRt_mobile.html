@@ -484,9 +484,9 @@
                 <div id="driveLog" style="font-size:0.72rem;color:var(--text-muted);background:var(--bg-dark);border-radius:6px;padding:6px 8px;margin-bottom:8px;max-height:80px;overflow-y:auto;display:none;font-family:monospace;line-height:1.5;white-space:pre-wrap"></div>
                 <div class="drive-btns">
                     <button class="btn btn-primary" onclick="driveConnect()">🔗 Connecter</button>
-                    <button class="btn btn-muted" id="btnDriveLoad" onclick="driveLoad()" disabled>⬇ Charger depuis Drive</button>
+                    <button class="btn btn-warning" id="btnDriveLoad" onclick="driveLoad()" disabled>⬇ Charger depuis Drive</button>
                     <button class="btn btn-success" id="btnDriveSave" onclick="driveSave()" disabled>⬆ Sauvegarder sur Drive</button>
-                    <button class="btn btn-warning btn-sm" onclick="driveTest()">🧪 TEST DRIVE</button>
+                    <button class="btn btn-warning btn-sm" onclick="driveTest()" style="display:none">🧪 TEST DRIVE</button>
                 </div>
                 <div class="divider"></div>
                 <p style="font-size:0.78rem;color:var(--text-muted);line-height:1.4">
@@ -591,6 +591,8 @@
                 <p style="font-size:0.78rem;color:var(--text-muted);line-height:1.4;margin-bottom:10px">
                     Recherche sur Geneanet par lieu et période.
                 </p>
+                <label style="font-size:0.78rem;color:var(--text-muted)">Utilisateur Geneanet</label>
+                <input type="text" id="popUser" class="search-input" placeholder="ex : dupont_jean" style="margin-bottom:8px;width:100%;box-sizing:border-box">
                 <label style="font-size:0.78rem;color:var(--text-muted)">Lieu</label>
                 <input type="text" id="popLieu" class="search-input" placeholder="ex : La Frasse" style="margin-bottom:8px;width:100%;box-sizing:border-box">
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
@@ -607,6 +609,21 @@
                 <button class="btn btn-primary btn-full" onclick="openPopulation()">
                     🔎 Rechercher dans l'arbre
                 </button>
+
+                <div class="divider" style="margin:14px 0"></div>
+
+                <!-- Compteur visites -->
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <span style="font-size:0.8rem;font-weight:600;color:var(--accent)">📊 Visites Geneanet</span>
+                    <button class="btn btn-muted btn-sm" onclick="popStatsToggle()">Historique</button>
+                </div>
+                <div id="popStatsBar" style="display:flex;gap:10px;font-size:0.82rem;color:var(--text-muted);margin-bottom:4px">
+                    <span>Total : <strong id="popStatTotal" style="color:var(--accent)">0</strong></span>
+                    <span>Cette semaine : <strong id="popStatWeek" style="color:var(--accent3)">0</strong></span>
+                </div>
+                <div id="popStatsPanel" style="display:none;background:var(--bg-dark);border-radius:8px;padding:10px;margin-top:8px;max-height:200px;overflow-y:auto">
+                    <div id="popStatsContent" style="font-size:0.78rem;color:var(--text-muted);line-height:1.7"></div>
+                </div>
             </div>
         </div>
 
@@ -1645,17 +1662,24 @@ function drivePickerModal(svgFiles, csvFiles) {
         const list  = document.getElementById('drivePickerList');
         list.innerHTML = '';
 
-        // Construire les paires par nom de base (sans extension)
+        // Construire les paires complètes uniquement (SVG + CSV de même nom de base)
         const base = name => name.replace(/\.[^.]+$/, '').toLowerCase();
-        const allBases = [...new Set([
+        const pairs = [...new Set([
             ...svgFiles.map(f => base(f.name)),
             ...csvFiles.map(f => base(f.name))
-        ])].sort();
+        ])].sort()
+        .map(b => ({
+            b,
+            svg: svgFiles.find(f => base(f.name) === b) || null,
+            csv: csvFiles.find(f => base(f.name) === b) || null
+        }))
+        .filter(p => p.svg && p.csv);  // paires complètes seulement
 
-        allBases.forEach(b => {
-            const svg = svgFiles.find(f => base(f.name) === b) || null;
-            const csv = csvFiles.find(f => base(f.name) === b) || null;
+        if (pairs.length === 0) {
+            list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;text-align:center;padding:16px">Aucune paire SVG + CSV de même nom trouvée dans le dossier.</p>';
+        }
 
+        pairs.forEach(({ b, svg, csv }) => {
             const card = document.createElement('div');
             card.style.cssText = `
                 background: var(--bg-dark);
@@ -1676,28 +1700,16 @@ function drivePickerModal(svgFiles, csvFiles) {
             const tags = document.createElement('div');
             tags.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
 
-            if (svg) {
-                const t = document.createElement('span');
-                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#adf';
-                t.textContent = '🗺 ' + svg.name;
-                tags.appendChild(t);
-            } else {
-                const t = document.createElement('span');
-                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:var(--text-muted);opacity:.5';
-                t.textContent = '🗺 (pas de SVG)';
-                tags.appendChild(t);
-            }
-            if (csv) {
-                const t = document.createElement('span');
-                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#afd';
-                t.textContent = '📋 ' + csv.name;
-                tags.appendChild(t);
-            } else {
-                const t = document.createElement('span');
-                t.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:var(--text-muted);opacity:.5';
-                t.textContent = '📋 (pas de CSV)';
-                tags.appendChild(t);
-            }
+            const tSvg = document.createElement('span');
+            tSvg.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#adf';
+            tSvg.textContent = '🗺 ' + svg.name;
+            tags.appendChild(tSvg);
+
+            const tCsv = document.createElement('span');
+            tCsv.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#afd';
+            tCsv.textContent = '📋 ' + csv.name;
+            tags.appendChild(tCsv);
+
             card.appendChild(tags);
 
             card.addEventListener('click', () => {
@@ -1707,7 +1719,6 @@ function drivePickerModal(svgFiles, csvFiles) {
             list.appendChild(card);
         });
 
-        // Si un seul fichier isolé (pas de paire), l'afficher quand même
         modal._cancelCb = () => resolve(null);
         modal.classList.add('open');
     });
@@ -2093,12 +2104,102 @@ function toast(msg, dur = 2800) {
 }
 
 // ── POPULATION (GENEANET) ────────────────────────────
+const POP_EXCLUDED = ['pract', 'ractphilippe'];
+const POP_STORAGE_KEY = 'cartum_pop_visits';
+
+function popVisitsLoad() {
+    try { return JSON.parse(localStorage.getItem(POP_STORAGE_KEY) || '[]'); }
+    catch(e) { return []; }
+}
+function popVisitsSave(visits) {
+    localStorage.setItem(POP_STORAGE_KEY, JSON.stringify(visits));
+}
+
+// ISO week key : "2025-W23"
+function isoWeekKey(date) {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const year = d.getUTCFullYear();
+    const week = Math.ceil(((d - new Date(Date.UTC(year, 0, 1))) / 86400000 + 1) / 7);
+    return `${year}-S${String(week).padStart(2,'0')}`;
+}
+
+function popRecordVisit(user) {
+    if (!user || POP_EXCLUDED.includes(user.toLowerCase())) return;
+    const visits = popVisitsLoad();
+    visits.push({ user, date: new Date().toISOString() });
+    popVisitsSave(visits);
+    popStatsRefresh();
+}
+
+function popStatsRefresh() {
+    const visits = popVisitsLoad()
+        .filter(v => !POP_EXCLUDED.includes((v.user||'').toLowerCase()));
+
+    // Total visiteurs uniques toutes périodes
+    const allUsers = [...new Set(visits.map(v => v.user.toLowerCase()))];
+    document.getElementById('popStatTotal').textContent = allUsers.length;
+
+    // Unique cette semaine
+    const thisWeek = isoWeekKey(new Date());
+    const weekUsers = [...new Set(
+        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek)
+              .map(v => v.user.toLowerCase())
+    )];
+    document.getElementById('popStatWeek').textContent = weekUsers.length;
+}
+
+function popStatsToggle() {
+    const panel = document.getElementById('popStatsPanel');
+    const visible = panel.style.display !== 'none';
+    if (!visible) {
+        popStatsRender();
+        panel.style.display = 'block';
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function popStatsRender() {
+    const visits = popVisitsLoad()
+        .filter(v => !POP_EXCLUDED.includes((v.user||'').toLowerCase()));
+
+    // Regrouper par semaine → utilisateurs uniques
+    const byWeek = {};
+    visits.forEach(v => {
+        const wk = isoWeekKey(new Date(v.date));
+        if (!byWeek[wk]) byWeek[wk] = new Set();
+        byWeek[wk].add(v.user.toLowerCase());
+    });
+
+    const weeks = Object.keys(byWeek).sort().reverse();
+    const content = document.getElementById('popStatsContent');
+
+    if (weeks.length === 0) {
+        content.innerHTML = '<em>Aucune visite enregistrée.</em>';
+        return;
+    }
+
+    content.innerHTML = weeks.map(wk => {
+        const users = [...byWeek[wk]].sort();
+        return `<div style="margin-bottom:6px">
+            <span style="color:var(--accent3);font-weight:600">${wk}</span>
+            <span style="color:var(--text-muted)"> — ${users.length} visiteur${users.length>1?'s':''} : </span>
+            <span style="color:#ddd">${users.join(', ')}</span>
+        </div>`;
+    }).join('');
+}
+
 function openPopulation() {
-    const lieu  = (document.getElementById('popLieu').value || '').trim();
+    const user  = (document.getElementById('popUser').value  || '').trim();
+    const lieu  = (document.getElementById('popLieu').value  || '').trim();
     const anDeb = (document.getElementById('popAnDeb').value || '').trim();
     const anFin = (document.getElementById('popAnFin').value || '').trim();
 
     if (!lieu) { toast('Veuillez saisir un lieu'); return; }
+
+    // Enregistrer la visite (si user renseigné et non exclu)
+    if (user) popRecordVisit(user);
 
     // Ouvrir Geneanet dans un nouvel onglet
     window.open('https://gw.geneanet.org/pract_w?lang=fr&m=H&v=search_event', '_blank', 'noopener');
@@ -2117,19 +2218,19 @@ function closePopModal() {
 function copyPopValue(id) {
     const val = document.getElementById(id).textContent;
     if (val === '—') return;
-    navigator.clipboard.writeText(val).then(() => toast('Copie : ' + val)).catch(() => {
+    navigator.clipboard.writeText(val).then(() => toast('Copié : ' + val)).catch(() => {
         const ta = document.createElement('textarea');
         ta.value = val; document.body.appendChild(ta); ta.select();
         document.execCommand('copy'); document.body.removeChild(ta);
-        toast('Copie : ' + val);
+        toast('Copié : ' + val);
     });
 }
 
 // ── INIT ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     checkDriveCallback();
-    // Open Drive section by default
     document.getElementById('sec-drive').classList.add('expanded');
+    popStatsRefresh();
 });
 </script>
 </body>
