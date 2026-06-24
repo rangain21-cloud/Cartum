@@ -694,14 +694,21 @@
 
 <!-- ══ MODALE CHOIX FICHIERS DRIVE ═══════════════════ -->
 <div class="modal" id="drivePickerModal">
-    <div class="modal-box" style="max-width:400px">
+    <div class="modal-box" style="max-width:420px">
         <div class="modal-title" style="color:var(--accent3)">☁️ Choisir les fichiers à charger</div>
-        <div class="modal-body">
-            Sélectionnez une paire SVG + CSV cohérente depuis votre dossier <strong>Cartum</strong>&nbsp;:
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+            <div>
+                <div style="font-size:0.78rem;font-weight:600;color:#adf;margin-bottom:6px">🗺 Carte SVG</div>
+                <div id="drivePickerSvgList" style="display:flex;flex-direction:column;gap:6px;max-height:45vh;overflow-y:auto"></div>
+            </div>
+            <div>
+                <div style="font-size:0.78rem;font-weight:600;color:#afd;margin-bottom:6px">📋 Légende CSV</div>
+                <div id="drivePickerCsvList" style="display:flex;flex-direction:column;gap:6px;max-height:45vh;overflow-y:auto"></div>
+            </div>
         </div>
-        <div id="drivePickerList" style="display:flex;flex-direction:column;gap:10px;max-height:55vh;overflow-y:auto;margin-bottom:16px"></div>
         <div class="modal-btns">
             <button class="btn btn-sm" style="background:var(--accent3);color:#000;font-weight:600" onclick="closeDrivePickerModal()">Annuler</button>
+            <button class="btn btn-sm btn-primary" id="drivePickerConfirm" onclick="drivePickerConfirm()" disabled>⬇ Charger</button>
         </div>
     </div>
 </div>
@@ -1656,78 +1663,69 @@ async function driveLoad() {
 }
 
 // ── Modale de choix SVG + CSV depuis Drive ──────────────────────────
+let _drivePickerResolve = null;
+let _drivePickerSel = { svg: null, csv: null };
+
 function drivePickerModal(svgFiles, csvFiles) {
     return new Promise(resolve => {
+        _drivePickerResolve = resolve;
+        _drivePickerSel = { svg: null, csv: null };
+
         const modal = document.getElementById('drivePickerModal');
-        const list  = document.getElementById('drivePickerList');
-        list.innerHTML = '';
+        document.getElementById('drivePickerConfirm').disabled = true;
 
-        // Construire les paires complètes uniquement (SVG + CSV de même nom de base)
-        const base = name => name.replace(/\.[^.]+$/, '').toLowerCase();
-        const pairs = [...new Set([
-            ...svgFiles.map(f => base(f.name)),
-            ...csvFiles.map(f => base(f.name))
-        ])].sort()
-        .map(b => ({
-            b,
-            svg: svgFiles.find(f => base(f.name) === b) || null,
-            csv: csvFiles.find(f => base(f.name) === b) || null
-        }))
-        .filter(p => p.svg && p.csv);  // paires complètes seulement
-
-        if (pairs.length === 0) {
-            list.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;text-align:center;padding:16px">Aucune paire SVG + CSV de même nom trouvée dans le dossier.</p>';
+        // Construire une liste de boutons pour chaque type
+        function buildList(containerId, files, type, color) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            if (files.length === 0) {
+                container.innerHTML = `<span style="font-size:0.78rem;color:var(--text-muted)">Aucun fichier</span>`;
+                return;
+            }
+            files.slice().sort((a,b) => a.name.localeCompare(b.name)).forEach(f => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-muted btn-sm';
+                btn.style.cssText = `text-align:left;width:100%;font-size:0.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border:2px solid transparent;`;
+                btn.title = f.name;
+                btn.textContent = f.name;
+                btn.dataset.id = f.id;
+                btn.addEventListener('click', () => {
+                    // Désélectionner les autres du même groupe
+                    container.querySelectorAll('button').forEach(b => {
+                        b.style.borderColor = 'transparent';
+                        b.style.color = '';
+                    });
+                    btn.style.borderColor = color;
+                    btn.style.color = color;
+                    _drivePickerSel[type] = f;
+                    // Activer Charger dès qu'au moins un fichier est choisi
+                    document.getElementById('drivePickerConfirm').disabled =
+                        !_drivePickerSel.svg && !_drivePickerSel.csv;
+                });
+                container.appendChild(btn);
+            });
         }
 
-        pairs.forEach(({ b, svg, csv }) => {
-            const card = document.createElement('div');
-            card.style.cssText = `
-                background: var(--bg-dark);
-                border-radius: 10px;
-                padding: 12px 14px;
-                cursor: pointer;
-                border: 2px solid transparent;
-                transition: border-color .15s;
-            `;
-            card.onmouseenter = () => card.style.borderColor = 'var(--accent3)';
-            card.onmouseleave = () => card.style.borderColor = 'transparent';
-
-            const title = document.createElement('div');
-            title.style.cssText = 'font-weight:700;font-size:0.92rem;color:var(--accent3);margin-bottom:6px';
-            title.textContent = '📁 ' + b;
-            card.appendChild(title);
-
-            const tags = document.createElement('div');
-            tags.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-
-            const tSvg = document.createElement('span');
-            tSvg.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#adf';
-            tSvg.textContent = '🗺 ' + svg.name;
-            tags.appendChild(tSvg);
-
-            const tCsv = document.createElement('span');
-            tCsv.style.cssText = 'background:var(--bg-card);border-radius:6px;padding:3px 8px;font-size:0.78rem;color:#afd';
-            tCsv.textContent = '📋 ' + csv.name;
-            tags.appendChild(tCsv);
-
-            card.appendChild(tags);
-
-            card.addEventListener('click', () => {
-                modal.classList.remove('open');
-                resolve({ svg, csv });
-            });
-            list.appendChild(card);
-        });
+        buildList('drivePickerSvgList', svgFiles, 'svg', '#adf');
+        buildList('drivePickerCsvList', csvFiles, 'csv', '#afd');
 
         modal._cancelCb = () => resolve(null);
         modal.classList.add('open');
     });
 }
 
+function drivePickerConfirm() {
+    const modal = document.getElementById('drivePickerModal');
+    modal.classList.remove('open');
+    if (_drivePickerResolve) _drivePickerResolve({ ..._drivePickerSel });
+    _drivePickerResolve = null;
+}
+
 function closeDrivePickerModal() {
     const modal = document.getElementById('drivePickerModal');
     modal.classList.remove('open');
     if (modal._cancelCb) modal._cancelCb();
+    _drivePickerResolve = null;
 }
 
 
