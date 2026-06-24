@@ -500,8 +500,12 @@
                     <button class="btn btn-muted btn-sm btn-full" onclick="document.getElementById('localSvgInput').click()">🗺 Carte SVG</button>
                     <button class="btn btn-muted btn-sm btn-full" onclick="openCsvSourcePicker()">📋 Légende CSV</button>
                 </div>
+                <div style="margin-top:6px">
+                    <button class="btn btn-muted btn-sm btn-full" onclick="document.getElementById('localImgFolderInput').click()">🖼 Dossier Images</button>
+                </div>
                 <input type="file" id="localSvgInput" accept=".svg" onchange="loadLocalSvg(this)">
                 <input type="file" id="localCsvInput" accept=".csv,.txt,text/csv,text/plain,text/comma-separated-values" onchange="loadLocalCsv(this)" style="display:none">
+                <input type="file" id="localImgFolderInput" webkitdirectory multiple accept=".jpg,.jpeg,.png,.gif,.webp" onchange="loadLocalImgFolder(this)" style="display:none">
                 <div id="localStatus" class="status-msg" style="margin-top:6px"></div>
             </div>
         </div>
@@ -951,6 +955,49 @@ function applyXform() {
 }
 
 // ── LOAD LOCAL FILES ────────────────────────────────
+// ── DOSSIER IMAGES LOCAL ─────────────────────────────
+const localImgCache = {};  // { "images/Prop1809_07.jpg": "blob:..." }
+
+function loadLocalImgFolder(input) {
+    const files = Array.from(input.files);
+    if (!files.length) return;
+
+    // Révoquer les anciens blobs pour libérer la mémoire
+    Object.values(localImgCache).forEach(url => URL.revokeObjectURL(url));
+    Object.keys(localImgCache).forEach(k => delete localImgCache[k]);
+
+    let count = 0;
+    files.forEach(file => {
+        const lc = file.name.toLowerCase();
+        if (!/\.(jpg|jpeg|png|gif|webp)$/.test(lc)) return;
+        const blob = URL.createObjectURL(file);
+        // Stocker sous plusieurs formes de clé pour matcher les chemins CSV
+        // ex : "images/Prop1809_07.jpg", "Prop1809_07.jpg", "Prop1809_07"
+        const name = file.name;
+        const noExt = name.replace(/\.[^.]+$/, '');
+        localImgCache[name.toLowerCase()]            = blob;
+        localImgCache[noExt.toLowerCase()]           = blob;
+        localImgCache[`images/${name}`.toLowerCase()] = blob;
+        localImgCache[`images/${noExt}`.toLowerCase()] = blob;
+        count++;
+    });
+
+    setLocalStatus(`🖼 ${count} image(s) chargée(s)`, 'ok');
+    input.value = '';
+}
+
+function resolveImgSrc(src) {
+    // Chercher dans le cache local (insensible à la casse, avec/sans dossier)
+    const key = src.toLowerCase();
+    if (localImgCache[key]) return localImgCache[key];
+    // Essayer sans chemin de dossier
+    const filename = src.split('/').pop().toLowerCase();
+    if (localImgCache[filename]) return localImgCache[filename];
+    const noExt = filename.replace(/\.[^.]+$/, '');
+    if (localImgCache[noExt]) return localImgCache[noExt];
+    return src; // fallback : chemin original
+}
+
 function loadLocalSvg(input) {
     const file = input.files[0]; if (!file) return;
     const reader = new FileReader();
@@ -2079,6 +2126,7 @@ async function updateDriveFile(fileId, content, mime) {
 
 // ── IMAGE MODAL ──────────────────────────────────────
 function openImgModal(src) {
+    const resolved = resolveImgSrc(src);
     const img = document.getElementById('imgModalImg');
     const err = document.getElementById('imgModalError');
     img.style.display = 'none';
@@ -2086,7 +2134,7 @@ function openImgModal(src) {
     document.getElementById('imgModalSrc').textContent = src;
     img.onload  = () => { img.style.display = 'block'; err.style.display = 'none'; };
     img.onerror = () => { img.style.display = 'none'; err.style.display = 'flex'; };
-    img.src = src;
+    img.src = resolved;
     document.getElementById('imgModal').classList.add('open');
 }
 function closeImgModal() {
