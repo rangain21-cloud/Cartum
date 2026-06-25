@@ -1085,10 +1085,32 @@ function mapElements() {
         if (!row) row = csvData.find(r => r.IdLot && label.includes(r.IdLot));
         if (row) {
             el._csvData = row;
+            // Sauvegarder le style original pour restauration
+            el._origFill   = el.style.fill   || el.getAttribute('fill')   || '';
+            el._origStroke = el.style.stroke  || el.getAttribute('stroke') || '';
+            el._origStrokeW = el.style.strokeWidth || el.getAttribute('stroke-width') || '';
             allSvgElements.push(el);
             el.addEventListener('click', handleLotClick);
         }
     });
+}
+
+// Applique une surbrillance directement via style (écrase fill inline)
+function hlSet(el, fill, stroke, strokeW) {
+    el.style.setProperty('fill',         fill,   'important');
+    el.style.setProperty('stroke',       stroke, 'important');
+    el.style.setProperty('stroke-width', strokeW,'important');
+    el.style.cursor = 'pointer';
+}
+
+// Restaure le style original
+function hlClear(el) {
+    el.style.removeProperty('fill');
+    el.style.removeProperty('stroke');
+    el.style.removeProperty('stroke-width');
+    el.style.cursor = '';
+    // Si la valeur venait d'un attribut (pas de style inline), il faut aussi effacer
+    // ce qu'on avait posé — les removeProperty suffisent car on n'a pas touché aux attributs
 }
 
 // ── LOT CLICK ───────────────────────────────────────
@@ -1103,15 +1125,13 @@ function selectLot(idLot, clickedEl) {
     clearAllHighlights();
     currentIdLot = idLot;
 
-    // highlight clicked element
-    if (clickedEl) clickedEl.classList.add('hl-selected');
+    if (clickedEl) hlSet(clickedEl, '#40E0D0', '#0000FF', '2px');
 
-    // highlight same-owner elements
     const data = csvData.find(r => String(r.IdLot) === String(idLot));
     if (data && data.IdProprio) {
         allSvgElements.forEach(el => {
             if (el._csvData && el._csvData.IdProprio === data.IdProprio && el !== clickedEl) {
-                el.classList.add('hl-same');
+                hlSet(el, '#2ecc71', '#27ae60', '2px');
             }
         });
     }
@@ -1119,7 +1139,6 @@ function selectLot(idLot, clickedEl) {
     showLotInfo(idLot);
     updateHeader(idLot);
     openInfoSection();
-    // Rafraîchir la liste du proprio si un filtre est actif ou si ce lot a un proprio
     const _d = csvData ? csvData.find(r => String(r.IdLot) === String(idLot)) : null;
     if (_d && _d.IdProprio) {
         if (activeFilterProprio === _d.IdProprio) {
@@ -1177,11 +1196,11 @@ function selectLotFromList(idLot) {
         });
     }
     if (el) {
-        el.classList.add('hl-selected');
+        hlSet(el, '#40E0D0', '#0000FF', '2px');
         if (data && data.IdProprio) {
             allSvgElements.forEach(e2 => {
                 if (e2._csvData && e2._csvData.IdProprio === data.IdProprio && e2 !== el)
-                    e2.classList.add('hl-same');
+                    hlSet(e2, '#2ecc71', '#27ae60', '2px');
             });
         }
         centerOnElement(el);
@@ -1365,6 +1384,7 @@ async function exportCsv() {
 function clearAllHighlights() {
     allSvgElements.forEach(el => {
         el.classList.remove('hl-selected', 'hl-same', 'hl-filter', 'hl-search');
+        hlClear(el);
     });
 }
 
@@ -1423,7 +1443,7 @@ function applyProprioFilter() {
     allSvgElements.forEach(el => {
         const r = el._csvData;
         if (r && r.IdProprio === id) {
-            el.classList.add('hl-filter');
+            hlSet(el, '#9b59b6', '#8e44ad', '2px');
             el.style.opacity = '';
         } else {
             el.style.opacity = '0.15';
@@ -1521,8 +1541,6 @@ function searchLot() {
     const el = allSvgElements.find(e => e._csvData && String(e._csvData.IdLot) === val);
     clearAllHighlights();
     if (el) {
-        el.classList.add('hl-search');
-        // center on element
         centerOnElement(el);
     }
     selectLot(val, el || null);
@@ -2187,7 +2205,8 @@ function toast(msg, dur = 2800) {
 }
 
 // ── POPULATION (GENEANET) ────────────────────────────
-const POP_EXCLUDED = ['pract', 'ractphilippe'];
+const POP_EXCLUDED = [];   // plus d'exclusion – tous les utilisateurs sont comptabilisés
+const POP_OWNERS   = ['pract', 'ractphilippe'];  // propriétaires : affichés mais distingués
 const POP_STORAGE_KEY = 'cartum_pop_visits';
 
 function popVisitsLoad() {
@@ -2216,17 +2235,13 @@ function popRecordVisit(user) {
 }
 
 function popStatsRefresh() {
-    const visits = popVisitsLoad()
-        .filter(v => !POP_EXCLUDED.includes((v.user||'').toLowerCase()));
-
-    // Total visiteurs uniques toutes périodes
+    const visits = popVisitsLoad();
     const allUsers = [...new Set(visits.map(v => v.user.toLowerCase()))];
-    document.getElementById('popStatTotal').textContent = allUsers.length;
-
-    // Unique cette semaine
+    const extUsers = allUsers.filter(u => !POP_OWNERS.includes(u));
+    document.getElementById('popStatTotal').textContent = extUsers.length + ' ext. / ' + allUsers.length + ' total';
     const thisWeek = isoWeekKey(new Date());
     const weekUsers = [...new Set(
-        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek)
+        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek && !POP_OWNERS.includes(v.user.toLowerCase()))
               .map(v => v.user.toLowerCase())
     )];
     document.getElementById('popStatWeek').textContent = weekUsers.length;
@@ -2244,33 +2259,29 @@ function popStatsToggle() {
 }
 
 function popStatsRender() {
-    const visits = popVisitsLoad()
-        .filter(v => !POP_EXCLUDED.includes((v.user||'').toLowerCase()));
-
-    // Regrouper par semaine → utilisateurs uniques
+    const visits = popVisitsLoad();
     const byWeek = {};
     visits.forEach(v => {
         const wk = isoWeekKey(new Date(v.date));
         if (!byWeek[wk]) byWeek[wk] = new Set();
         byWeek[wk].add(v.user.toLowerCase());
     });
-
     const weeks = Object.keys(byWeek).sort().reverse();
     const content = document.getElementById('popStatsContent');
-
-    if (weeks.length === 0) {
-        content.innerHTML = '<em>Aucune visite enregistrée.</em>';
-        return;
-    }
-
+    if (weeks.length === 0) { content.innerHTML = '<em>Aucune visite enregistrée.</em>'; return; }
     content.innerHTML = weeks.map(wk => {
-        const users = [...byWeek[wk]].sort();
+        const allU = [...byWeek[wk]].sort();
+        const extU = allU.filter(u => !POP_OWNERS.includes(u));
+        const usersHtml = allU.map(u =>
+            POP_OWNERS.includes(u)
+                ? `<span style="color:var(--accent3);font-style:italic">${u}*</span>`
+                : `<span style="color:#ddd">${u}</span>`
+        ).join(', ');
         return `<div style="margin-bottom:6px">
             <span style="color:var(--accent3);font-weight:600">${wk}</span>
-            <span style="color:var(--text-muted)"> — ${users.length} visiteur${users.length>1?'s':''} : </span>
-            <span style="color:#ddd">${users.join(', ')}</span>
+            <span style="color:var(--text-muted)"> — ${extU.length} ext. : </span>${usersHtml}
         </div>`;
-    }).join('');
+    }).join('') + '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px">* propriétaires de l'arbre</div>';
 }
 
 function openPopulation() {
