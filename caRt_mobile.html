@@ -880,7 +880,6 @@ mapArea.addEventListener('wheel', onWheel, { passive: false });
 const CLICK_THRESHOLD = 5;
 
 function onTouchStart(e) {
-    // Ne pas preventDefault sur 1 doigt pour laisser les events click se propager
     if (e.touches.length >= 2) e.preventDefault();
     Array.from(e.changedTouches).forEach(t => { touches[t.identifier] = { x: t.clientX, y: t.clientY }; });
     const ids = Object.keys(touches);
@@ -902,12 +901,10 @@ function onTouchMove(e) {
     if (ids.length >= 2 && isPinching) {
         const a = touches[ids[0]], b = touches[ids[1]];
         const dist = Math.hypot(b.x - a.x, b.y - a.y);
-        const center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         const ratio = dist / lastDist;
         const rect = mapArea.getBoundingClientRect();
         zoom(center.x - rect.left, center.y - rect.top, ratio);
         lastDist = dist;
-        lastCenter = center;
     } else if (ids.length === 1 && !isPinching && panStart) {
         const t = touches[ids[0]];
         const dx = t.x - panStart.px, dy = t.y - panStart.py;
@@ -921,16 +918,9 @@ function onTouchMove(e) {
 }
 let _touchHasMoved = false;
 function onTouchEnd(e) {
-    // Si le doigt n'a pas bougé → c'est un tap → déclencher le clic sur l'élément SVG
     if (!_touchHasMoved && e.changedTouches.length === 1) {
         const t = e.changedTouches[0];
-        const el = document.elementFromPoint(t.clientX, t.clientY);
-        if (el) {
-            const lotEl = el.closest('*[inkscape\\:label]');
-            if (lotEl && lotEl._csvData) {
-                selectLot(lotEl._csvData.IdLot, lotEl);
-            }
-        }
+        trySelectAtPoint(t.clientX, t.clientY);
     }
     Array.from(e.changedTouches).forEach(t => { delete touches[t.identifier]; });
     const ids = Object.keys(touches);
@@ -940,8 +930,6 @@ function onTouchEnd(e) {
 
 let isDragging = false, dragStart = null;
 function onMouseDown(e) {
-    // Ne pas traiter les clics sur les éléments SVG avec données (ils ont leur propre handler)
-    if (e.target.closest('*[inkscape\\:label]')) return;
     isDragging = true;
     dragStart = { px: e.clientX, py: e.clientY, tx: xform.x, ty: xform.y };
 }
@@ -953,7 +941,24 @@ function onMouseMove(e) {
     applyXform();
 }
 function onMouseUp(e) {
+    if (isDragging && dragStart) {
+        const dx = Math.abs(e.clientX - dragStart.px);
+        const dy = Math.abs(e.clientY - dragStart.py);
+        if (dx < CLICK_THRESHOLD && dy < CLICK_THRESHOLD) {
+            trySelectAtPoint(e.clientX, e.clientY);
+        }
+    }
     isDragging = false; dragStart = null;
+}
+
+// Point d'entrée unique pour sélectionner un lot à des coordonnées écran
+function trySelectAtPoint(cx, cy) {
+    const el = document.elementFromPoint(cx, cy);
+    if (!el) return;
+    const lotEl = el.closest ? el.closest('[inkscape\\:label]') : null;
+    if (lotEl && lotEl._csvData) {
+        selectLot(lotEl._csvData.IdLot, lotEl);
+    }
 }
 function onWheel(e) {
     e.preventDefault();
@@ -1085,12 +1090,11 @@ function mapElements() {
         if (!row) row = csvData.find(r => r.IdLot && label.includes(r.IdLot));
         if (row) {
             el._csvData = row;
-            // Sauvegarder les valeurs de style INLINE uniquement (pas les attributs)
             el._origStyleFill    = el.style.fill        || '';
             el._origStyleStroke  = el.style.stroke      || '';
             el._origStyleStrokeW = el.style.strokeWidth || '';
+            el.style.cursor = 'pointer';
             allSvgElements.push(el);
-            el.addEventListener('click', handleLotClick);
         }
     });
 }
