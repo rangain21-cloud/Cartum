@@ -1085,10 +1085,10 @@ function mapElements() {
         if (!row) row = csvData.find(r => r.IdLot && label.includes(r.IdLot));
         if (row) {
             el._csvData = row;
-            // Sauvegarder le style original pour restauration
-            el._origFill   = el.style.fill   || el.getAttribute('fill')   || '';
-            el._origStroke = el.style.stroke  || el.getAttribute('stroke') || '';
-            el._origStrokeW = el.style.strokeWidth || el.getAttribute('stroke-width') || '';
+            // Sauvegarder les valeurs de style INLINE uniquement (pas les attributs)
+            el._origStyleFill    = el.style.fill        || '';
+            el._origStyleStroke  = el.style.stroke      || '';
+            el._origStyleStrokeW = el.style.strokeWidth || '';
             allSvgElements.push(el);
             el.addEventListener('click', handleLotClick);
         }
@@ -1103,14 +1103,30 @@ function hlSet(el, fill, stroke, strokeW) {
     el.style.cursor = 'pointer';
 }
 
-// Restaure le style original
+// Restaure le style original sauvegardé au moment du mapElements
 function hlClear(el) {
-    el.style.removeProperty('fill');
-    el.style.removeProperty('stroke');
-    el.style.removeProperty('stroke-width');
+    // Restaurer fill
+    if (el._origStyleFill !== undefined) {
+        if (el._origStyleFill !== '') el.style.fill = el._origStyleFill;
+        else el.style.removeProperty('fill');
+    } else {
+        el.style.removeProperty('fill');
+    }
+    // Restaurer stroke
+    if (el._origStyleStroke !== undefined) {
+        if (el._origStyleStroke !== '') el.style.stroke = el._origStyleStroke;
+        else el.style.removeProperty('stroke');
+    } else {
+        el.style.removeProperty('stroke');
+    }
+    // Restaurer stroke-width
+    if (el._origStyleStrokeW !== undefined) {
+        if (el._origStyleStrokeW !== '') el.style.strokeWidth = el._origStyleStrokeW;
+        else el.style.removeProperty('stroke-width');
+    } else {
+        el.style.removeProperty('stroke-width');
+    }
     el.style.cursor = '';
-    // Si la valeur venait d'un attribut (pas de style inline), il faut aussi effacer
-    // ce qu'on avait posé — les removeProperty suffisent car on n'a pas touché aux attributs
 }
 
 // ── LOT CLICK ───────────────────────────────────────
@@ -2205,8 +2221,8 @@ function toast(msg, dur = 2800) {
 }
 
 // ── POPULATION (GENEANET) ────────────────────────────
-const POP_EXCLUDED = [];   // plus d'exclusion – tous les utilisateurs sont comptabilisés
-const POP_OWNERS   = ['pract', 'ractphilippe'];  // propriétaires : affichés mais distingués
+const POP_EXCLUDED = [];   // aucune exclusion
+const POP_OWNERS   = [];   // tous comptabilisés de la même façon
 const POP_STORAGE_KEY = 'cartum_pop_visits';
 
 function popVisitsLoad() {
@@ -2237,11 +2253,10 @@ function popRecordVisit(user) {
 function popStatsRefresh() {
     const visits = popVisitsLoad();
     const allUsers = [...new Set(visits.map(v => v.user.toLowerCase()))];
-    const extUsers = allUsers.filter(u => !POP_OWNERS.includes(u));
-    document.getElementById('popStatTotal').textContent = extUsers.length + ' ext. / ' + allUsers.length + ' total';
+    document.getElementById('popStatTotal').textContent = allUsers.length;
     const thisWeek = isoWeekKey(new Date());
     const weekUsers = [...new Set(
-        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek && !POP_OWNERS.includes(v.user.toLowerCase()))
+        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek)
               .map(v => v.user.toLowerCase())
     )];
     document.getElementById('popStatWeek').textContent = weekUsers.length;
@@ -2270,18 +2285,13 @@ function popStatsRender() {
     const content = document.getElementById('popStatsContent');
     if (weeks.length === 0) { content.innerHTML = '<em>Aucune visite enregistrée.</em>'; return; }
     content.innerHTML = weeks.map(wk => {
-        const allU = [...byWeek[wk]].sort();
-        const extU = allU.filter(u => !POP_OWNERS.includes(u));
-        const usersHtml = allU.map(u =>
-            POP_OWNERS.includes(u)
-                ? `<span style="color:var(--accent3);font-style:italic">${u}*</span>`
-                : `<span style="color:#ddd">${u}</span>`
-        ).join(', ');
+        const users = [...byWeek[wk]].sort();
         return `<div style="margin-bottom:6px">
             <span style="color:var(--accent3);font-weight:600">${wk}</span>
-            <span style="color:var(--text-muted)"> — ${extU.length} ext. : </span>${usersHtml}
+            <span style="color:var(--text-muted)"> — ${users.length} visiteur${users.length > 1 ? 's' : ''} : </span>
+            <span style="color:#ddd">${users.join(', ')}</span>
         </div>`;
-    }).join('') + '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px">* propri\u00e9taires de l\'arbre</div>';
+    }).join('');
 }
 
 function openPopulation() {
