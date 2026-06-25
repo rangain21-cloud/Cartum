@@ -2303,7 +2303,9 @@ function openPopulation() {
     if (user) popRecordVisit(user);
 
     // Ouvrir Geneanet dans un nouvel onglet
-    window.open('https://gw.geneanet.org/pract_w?lang=fr&m=H&v=search_event', '_blank', 'noopener');
+    const base = user ? user.toLowerCase() : 'pract';
+    const url  = `https://gw.geneanet.org/${base}_w?lang=fr&m=H&v=search_event`;
+    window.open(url, '_blank', 'noopener');
 
     // Afficher la modale rappel avec les valeurs a copier
     document.getElementById('popModalLieu').textContent  = lieu;
