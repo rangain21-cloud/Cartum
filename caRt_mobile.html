@@ -876,8 +876,12 @@ mapArea.addEventListener('mousemove', onMouseMove);
 mapArea.addEventListener('mouseup', onMouseUp);
 mapArea.addEventListener('wheel', onWheel, { passive: false });
 
+// Seuil en pixels en deçà duquel on considère que c'est un clic (pas un drag)
+const CLICK_THRESHOLD = 5;
+
 function onTouchStart(e) {
-    e.preventDefault();
+    // Ne pas preventDefault sur 1 doigt pour laisser les events click se propager
+    if (e.touches.length >= 2) e.preventDefault();
     Array.from(e.changedTouches).forEach(t => { touches[t.identifier] = { x: t.clientX, y: t.clientY }; });
     const ids = Object.keys(touches);
     if (ids.length === 2) {
@@ -888,6 +892,7 @@ function onTouchStart(e) {
     } else if (ids.length === 1) {
         isPinching = false;
         panStart = { px: touches[ids[0]].x, py: touches[ids[0]].y, tx: xform.x, ty: xform.y };
+        _touchHasMoved = false;
     }
 }
 function onTouchMove(e) {
@@ -905,33 +910,49 @@ function onTouchMove(e) {
         lastCenter = center;
     } else if (ids.length === 1 && !isPinching && panStart) {
         const t = touches[ids[0]];
-        xform.x = panStart.tx + (t.x - panStart.px);
-        xform.y = panStart.ty + (t.y - panStart.py);
-        applyXform();
+        const dx = t.x - panStart.px, dy = t.y - panStart.py;
+        if (Math.abs(dx) > CLICK_THRESHOLD || Math.abs(dy) > CLICK_THRESHOLD) {
+            _touchHasMoved = true;
+            xform.x = panStart.tx + dx;
+            xform.y = panStart.ty + dy;
+            applyXform();
+        }
     }
 }
+let _touchHasMoved = false;
 function onTouchEnd(e) {
+    // Si le doigt n'a pas bougé → c'est un tap → déclencher le clic sur l'élément SVG
+    if (!_touchHasMoved && e.changedTouches.length === 1) {
+        const t = e.changedTouches[0];
+        const el = document.elementFromPoint(t.clientX, t.clientY);
+        if (el) {
+            const lotEl = el.closest('*[inkscape\\:label]');
+            if (lotEl && lotEl._csvData) {
+                selectLot(lotEl._csvData.IdLot, lotEl);
+            }
+        }
+    }
     Array.from(e.changedTouches).forEach(t => { delete touches[t.identifier]; });
     const ids = Object.keys(touches);
     if (ids.length < 2) isPinching = false;
-    if (ids.length === 0) panStart = null;
+    if (ids.length === 0) { panStart = null; _touchHasMoved = false; }
 }
 
 let isDragging = false, dragStart = null;
 function onMouseDown(e) {
+    // Ne pas traiter les clics sur les éléments SVG avec données (ils ont leur propre handler)
+    if (e.target.closest('*[inkscape\\:label]')) return;
     isDragging = true;
     dragStart = { px: e.clientX, py: e.clientY, tx: xform.x, ty: xform.y };
 }
 function onMouseMove(e) {
     if (!isDragging || !dragStart) return;
-    xform.x = dragStart.tx + (e.clientX - dragStart.px);
-    xform.y = dragStart.ty + (e.clientY - dragStart.py);
+    const dx = e.clientX - dragStart.px, dy = e.clientY - dragStart.py;
+    xform.x = dragStart.tx + dx;
+    xform.y = dragStart.ty + dy;
     applyXform();
 }
 function onMouseUp(e) {
-    if (Math.abs(e.clientX - (dragStart?.px||0)) < 4 && Math.abs(e.clientY - (dragStart?.py||0)) < 4) {
-        // treat as tap/click for SVG elements
-    }
     isDragging = false; dragStart = null;
 }
 function onWheel(e) {
