@@ -821,10 +821,10 @@ mapArea.addEventListener('touchstart', onTouchStart, { passive: false });
 mapArea.addEventListener('touchmove', onTouchMove, { passive: false });
 mapArea.addEventListener('touchend', onTouchEnd, { passive: false });
 mapArea.addEventListener('touchcancel', onTouchEnd, { passive: false });
-// Mouse support
+
 mapArea.addEventListener('mousedown', onMouseDown);
-mapArea.addEventListener('mousemove', onMouseMove);
-mapArea.addEventListener('mouseup', onMouseUp);
+document.addEventListener('mousemove', onMouseMove);
+document.addEventListener('mouseup',   onMouseUp);
 mapArea.addEventListener('wheel', onWheel, { passive: false });
 
 // Seuil en pixels en deçà duquel on considère que c'est un clic (pas un drag)
@@ -885,6 +885,7 @@ let isDragging = false, dragStart = null;
 function onMouseDown(e) {
     isDragging = true;
     dragStart = { px: e.clientX, py: e.clientY, tx: xform.x, ty: xform.y };
+    e.preventDefault();
 }
 function onMouseMove(e) {
     if (!isDragging || !dragStart) return;
@@ -894,12 +895,11 @@ function onMouseMove(e) {
     applyXform();
 }
 function onMouseUp(e) {
-    if (isDragging && dragStart) {
-        const dx = Math.abs(e.clientX - dragStart.px);
-        const dy = Math.abs(e.clientY - dragStart.py);
-        if (dx < CLICK_THRESHOLD && dy < CLICK_THRESHOLD) {
-            trySelectAtPoint(e.clientX, e.clientY);
-        }
+    if (!isDragging || !dragStart) return;
+    const dx = Math.abs(e.clientX - dragStart.px);
+    const dy = Math.abs(e.clientY - dragStart.py);
+    if (dx < CLICK_THRESHOLD && dy < CLICK_THRESHOLD) {
+        trySelectAtPoint(e.clientX, e.clientY);
     }
     isDragging = false; dragStart = null;
 }
