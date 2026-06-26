@@ -613,8 +613,8 @@
                     <button class="btn btn-muted btn-sm" onclick="popStatsToggle()">Historique</button>
                 </div>
                 <div id="popStatsBar" style="display:flex;gap:10px;font-size:0.82rem;color:var(--text-muted);margin-bottom:4px">
-                    <span>Total : <strong id="popStatTotal" style="color:var(--accent)">0</strong></span>
-                    <span>Cette semaine : <strong id="popStatWeek" style="color:var(--accent3)">0</strong></span>
+                    <span>Total : <strong id="popStatTotal" style="color:var(--accent)">—</strong></span>
+                    <span>visiteurs : <strong id="popStatWeek" style="color:var(--accent3)">0</strong></span>
                 </div>
                 <div id="popStatsPanel" style="display:none;background:var(--bg-dark);border-radius:8px;padding:10px;margin-top:8px;max-height:200px;overflow-y:auto">
                     <div id="popStatsContent" style="font-size:0.78rem;color:var(--text-muted);line-height:1.7"></div>
@@ -1302,10 +1302,27 @@ function updateExportBtn() {
 // ── CSV EXPORT ──────────────────────────────────────
 // ── CONSTRUCTION DU CONTENU CSV (partagée) ──────────
 function buildCsvContent() {
-    const headers = ['IdLot', 'IdProprio', 'Image', 'Famille', 'Lieu-dit', 'Cadrage', 'Texte', 'Picture'];
+    // Colonnes fixes de base + toutes les colonnes présentes dans le CSV (dont Visite)
+    const BASE_HEADERS = ['IdLot', 'IdProprio', 'Image', 'Famille', 'Lieu-dit', 'Cadrage', 'Texte', 'Picture'];
+    const allKeys = csvData.reduce((acc, r) => {
+        Object.keys(r).forEach(k => { if (!acc.includes(k)) acc.push(k); });
+        return acc;
+    }, []);
+    // Ordre : colonnes de base d'abord, puis les autres (dont Visite) dans leur ordre d'apparition
+    const headers = [
+        ...BASE_HEADERS,
+        ...allKeys.filter(k => !BASE_HEADERS.includes(k))
+    ];
+
     const rows = csvData.map(r => {
         const nr = {};
-        headers.forEach(h => { nr[h] = (h === 'Texte' || h === 'Picture') ? '' : (r[h] || ''); });
+        headers.forEach(h => {
+            if (h === 'Texte' || h === 'Picture') {
+                nr[h] = '';
+            } else {
+                nr[h] = (r[h] !== undefined && r[h] !== null) ? String(r[h]) : '';
+            }
+        });
         if (commentsData[r.IdLot]) {
             if (commentsData[r.IdLot].text)
                 nr.Texte = commentsData[r.IdLot].text.replace(/"/g, '""').replace(/[\r\n]+/g, ' ');
@@ -2208,18 +2225,6 @@ function popRecordVisit(user) {
     popStatsRefresh();
 }
 
-function popStatsRefresh() {
-    const visits = popVisitsLoad();
-    const allUsers = [...new Set(visits.map(v => v.user.toLowerCase()))];
-    document.getElementById('popStatTotal').textContent = allUsers.length;
-    const thisWeek = isoWeekKey(new Date());
-    const weekUsers = [...new Set(
-        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek)
-              .map(v => v.user.toLowerCase())
-    )];
-    document.getElementById('popStatWeek').textContent = weekUsers.length;
-}
-
 function popStatsToggle() {
     const panel = document.getElementById('popStatsPanel');
     const visible = panel.style.display !== 'none';
@@ -2283,12 +2288,12 @@ function popStatsRefresh() {
     }
     document.getElementById('popStatTotal').textContent = total;
 
-    // Cette semaine = comptage localStorage
+    // Cette semaine = utilisateurs Geneanet distincts (non vides)
     const visits = popVisitsLoad();
     const thisWeek = isoWeekKey(new Date());
     const weekUsers = [...new Set(
-        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek)
-              .map(v => v.user.toLowerCase())
+        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek && v.user && v.user.trim())
+              .map(v => v.user.toLowerCase().trim())
     )];
     document.getElementById('popStatWeek').textContent = weekUsers.length;
 }
