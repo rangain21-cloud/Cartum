@@ -597,23 +597,10 @@
             </div>
             <div class="section-body">
                 <p style="font-size:0.78rem;color:var(--text-muted);line-height:1.4;margin-bottom:10px">
-                    Recherche sur Geneanet par lieu et période.
+                    Recherche sur Geneanet par utilisateur.
                 </p>
                 <label style="font-size:0.78rem;color:var(--text-muted)">Utilisateur Geneanet</label>
-                <input type="text" id="popUser" class="search-input" placeholder="ex : ractphilippe ou pract" style="margin-bottom:8px;width:100%;box-sizing:border-box">
-                <label style="font-size:0.78rem;color:var(--text-muted)">Lieu</label>
-                <input type="text" id="popLieu" class="search-input" placeholder="ex : La Frasse" style="margin-bottom:8px;width:100%;box-sizing:border-box">
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-                    <div style="flex:1">
-                        <label style="font-size:0.78rem;color:var(--text-muted)">Année début</label>
-                        <input type="number" id="popAnDeb" class="search-input" placeholder="ex : 1680" style="width:100%;box-sizing:border-box">
-                    </div>
-                    <div style="font-size:1rem;color:var(--text-muted);margin-top:16px">→</div>
-                    <div style="flex:1">
-                        <label style="font-size:0.78rem;color:var(--text-muted)">Année fin</label>
-                        <input type="number" id="popAnFin" class="search-input" placeholder="ex : 1730" style="width:100%;box-sizing:border-box">
-                    </div>
-                </div>
+                <input type="text" id="popUser" class="search-input" placeholder="ex : ractphilippe ou pract" style="margin-bottom:12px;width:100%;box-sizing:border-box">
                 <button class="btn btn-primary btn-full" onclick="openPopulation()">
                     🔎 Rechercher dans l'arbre
                 </button>
@@ -722,42 +709,6 @@
         <div class="modal-btns">
             <button class="btn btn-sm" style="background:var(--accent3);color:#000;font-weight:600" onclick="closeDrivePickerModal()">Annuler</button>
             <button class="btn btn-sm btn-primary" id="drivePickerConfirm" onclick="drivePickerConfirm()" disabled>⬇ Charger</button>
-        </div>
-    </div>
-</div>
-
-<!-- ══ MODALE RAPPEL POPULATION ══════════════════════ -->
-<div class="modal" id="popModal">
-    <div class="modal-box" style="max-width:340px">
-        <div class="modal-title">👥 Geneanet ouvert dans un nouvel onglet</div>
-        <div class="modal-body" style="margin-bottom:14px">
-            Copiez les valeurs ci-dessous et collez-les dans le formulaire Geneanet&nbsp;:
-        </div>
-        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
-            <div style="background:var(--bg-dark);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-                <div>
-                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:2px">Lieu</div>
-                    <div id="popModalLieu" style="font-size:0.95rem;font-weight:600;color:var(--accent)"></div>
-                </div>
-                <button class="btn btn-muted btn-sm" onclick="copyPopValue('popModalLieu')" title="Copier">📋</button>
-            </div>
-            <div style="background:var(--bg-dark);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-                <div>
-                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:2px">Année début</div>
-                    <div id="popModalAnDeb" style="font-size:0.95rem;font-weight:600;color:var(--accent)"></div>
-                </div>
-                <button class="btn btn-muted btn-sm" onclick="copyPopValue('popModalAnDeb')" title="Copier">📋</button>
-            </div>
-            <div style="background:var(--bg-dark);border-radius:8px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center">
-                <div>
-                    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:2px">Année fin</div>
-                    <div id="popModalAnFin" style="font-size:0.95rem;font-weight:600;color:var(--accent)"></div>
-                </div>
-                <button class="btn btn-muted btn-sm" onclick="copyPopValue('popModalAnFin')" title="Copier">📋</button>
-            </div>
-        </div>
-        <div class="modal-btns">
-            <button class="btn btn-primary" onclick="closePopModal()">Fermer</button>
         </div>
     </div>
 </div>
@@ -1161,6 +1112,7 @@ function selectLot(idLot, clickedEl) {
     showLotInfo(idLot);
     updateHeader(idLot);
     openInfoSection();
+    popStatsRefresh();
     const _d = csvData ? csvData.find(r => String(r.IdLot) === String(idLot)) : null;
     if (_d && _d.IdProprio) {
         if (activeFilterProprio === _d.IdProprio) {
@@ -2300,12 +2252,51 @@ function popStatsRender() {
     }).join('');
 }
 
-function openPopulation() {
-    const user  = (document.getElementById('popUser').value  || '').trim();
-    const lieu  = (document.getElementById('popLieu').value  || '').trim();
-    const anDeb = (document.getElementById('popAnDeb').value || '').trim();
-    const anFin = (document.getElementById('popAnFin').value || '').trim();
+// ── Incrémente Visite dans csvData pour toutes les lignes du IdProprio courant
+function popIncrementVisite() {
+    if (!csvData || !currentIdLot) return false;
+    const row = csvData.find(r => String(r.IdLot) === String(currentIdLot));
+    if (!row || !row.IdProprio) return false;
+    const idProprio = row.IdProprio;
+    csvData.forEach(r => {
+        if (r.IdProprio === idProprio) {
+            r.Visite = (parseInt(r.Visite) || 0) + 1;
+        }
+    });
+    // Sauvegarder sur Drive si connecté
+    if (driveToken && driveFileIds.csv) {
+        driveSave();
+    }
+    return true;
+}
 
+// ── Affiche dans Total la valeur Visite du CSV pour le IdProprio courant
+function popStatsRefresh() {
+    // Total = valeur Visite du CSV pour le lot courant
+    let total = '—';
+    if (csvData && currentIdLot) {
+        const row = csvData.find(r => String(r.IdLot) === String(currentIdLot));
+        if (row && row.IdProprio) {
+            const ref = csvData.find(r => r.IdProprio === row.IdProprio && r.Visite !== undefined);
+            if (ref) total = ref.Visite || 0;
+        }
+    }
+    document.getElementById('popStatTotal').textContent = total;
+
+    // Cette semaine = comptage localStorage
+    const visits = popVisitsLoad();
+    const thisWeek = isoWeekKey(new Date());
+    const weekUsers = [...new Set(
+        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek)
+              .map(v => v.user.toLowerCase())
+    )];
+    document.getElementById('popStatWeek').textContent = weekUsers.length;
+}
+
+function openPopulation() {
+    const user = (document.getElementById('popUser').value || '').trim();
+
+    // Enregistrer la visite dans localStorage
     if (user) popRecordVisit(user);
 
     // Ouvrir Geneanet dans un nouvel onglet
@@ -2313,26 +2304,9 @@ function openPopulation() {
     const url  = `https://gw.geneanet.org/${base}_w?lang=fr&m=H&v=search_event`;
     window.open(url, '_blank', 'noopener');
 
-    // Afficher la modale rappel avec les valeurs a copier
-    document.getElementById('popModalLieu').textContent  = lieu;
-    document.getElementById('popModalAnDeb').textContent = anDeb || '—';
-    document.getElementById('popModalAnFin').textContent = anFin || '—';
-    document.getElementById('popModal').classList.add('open');
-}
-
-function closePopModal() {
-    document.getElementById('popModal').classList.remove('open');
-}
-
-function copyPopValue(id) {
-    const val = document.getElementById(id).textContent;
-    if (val === '—') return;
-    navigator.clipboard.writeText(val).then(() => toast('Copié : ' + val)).catch(() => {
-        const ta = document.createElement('textarea');
-        ta.value = val; document.body.appendChild(ta); ta.select();
-        document.execCommand('copy'); document.body.removeChild(ta);
-        toast('Copié : ' + val);
-    });
+    // Incrémenter Visite dans le CSV et rafraîchir l'affichage
+    popIncrementVisite();
+    popStatsRefresh();
 }
 
 // ── INIT ─────────────────────────────────────────────
