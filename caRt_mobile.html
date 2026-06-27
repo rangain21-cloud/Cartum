@@ -1138,14 +1138,6 @@ function showLotInfo(idLot) {
     if (data['Lieu-dit'])  html += row('Lieu-dit',  data['Lieu-dit']);
     if (data.Cadrage)      html += row('Cadrage',   data.Cadrage);
 
-    // Texte CSV
-    const csvTexte = data.Texte && data.Texte.trim() && data.Texte !== 'undefined' ? data.Texte : null;
-    if (csvTexte) {
-        html += `<div style="margin-top:8px;padding:8px;background:var(--bg-dark);border-radius:8px;
-                             border-left:3px solid var(--accent3);font-size:0.82rem;line-height:1.45;
-                             color:var(--text)">${escHtml(csvTexte)}</div>`;
-    }
-
     if (data.Image && data.Image.trim()) {
         html += `<div style="margin-top:10px"><button class="btn btn-primary btn-sm"
                     onclick="openImgModal('images/${data.Image}')">🖼 Précisions</button></div>`;
@@ -1246,6 +1238,9 @@ function showCommentForm() {
     ta.value = c ? (c.text || '') : '';
     _pendingImgBase64 = null;
     document.getElementById('commentImgPreview').style.display = 'none';
+    // Masquer les autres blocs pour n'afficher que le formulaire
+    document.getElementById('commentDisplay').style.display = 'none';
+    document.getElementById('noComment').style.display = 'none';
     cf.style.display = 'block';
     ta.focus();
 }
@@ -1253,6 +1248,8 @@ function editComment() { showCommentForm(); }
 function cancelComment() {
     document.getElementById('commentForm').style.display = 'none';
     _pendingImgBase64 = null;
+    // Restaurer l'affichage normal
+    updateCommentDisplay();
 }
 function previewCommentImg(input) {
     const file = input.files[0]; if (!file) return;
