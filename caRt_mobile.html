@@ -744,7 +744,7 @@ let activeFilterProprio = null;
 
 // ── GOOGLE DRIVE – GIS TokenClient (popup sans redirect) ───────────
 let driveToken   = null;      // access_token actif
-let driveFileIds = { svg: null, csv: null };
+let driveFileIds = { svg: null, csv: null, visites: null };
 const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.googleusercontent.com';   // ← votre Client ID OAuth2 ici
 const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive';
 const DRIVE_FOLDER    = 'Cartum';
@@ -2195,14 +2195,66 @@ function toast(msg, dur = 2800) {
 // ── POPULATION (GENEANET) ────────────────────────────
 const POP_EXCLUDED = [];   // aucune exclusion
 const POP_OWNERS   = [];   // tous comptabilisés de la même façon
-const POP_STORAGE_KEY = 'cartum_pop_visits';
+const POP_STORAGE_KEY = 'cartum_pop_visits';   // repli hors-ligne uniquement (par appareil)
+const POP_VISITS_FILE = 'visites.json';        // fichier partagé sur Drive (commun PC/Android)
 
-function popVisitsLoad() {
+// Retrouve (et mémorise) l'id du fichier visites.json partagé sur Drive
+async function driveGetVisitsFileId() {
+    if (driveFileIds.visites) return driveFileIds.visites;
+    if (!driveToken) return null;
+    try {
+        const folderId = await getOrCreateFolder(DRIVE_FOLDER);
+        const params = new URLSearchParams({
+            q: `'${folderId}' in parents and name = '${POP_VISITS_FILE}' and trashed = false`,
+            fields: 'files(id,name)'
+        });
+        const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        const d = await r.json();
+        if (d.files && d.files.length) driveFileIds.visites = d.files[0].id;
+    } catch (e) {
+        driveLog('driveGetVisitsFileId : ' + e.message);
+    }
+    return driveFileIds.visites;
+}
+
+// Charge l'historique des visites : Drive si connecté (source commune PC/Android),
+// avec repli sur le cache local si hors-ligne ou en cas d'erreur réseau.
+async function popVisitsLoad() {
+    if (driveToken) {
+        try {
+            const fileId = await driveGetVisitsFileId();
+            if (fileId) {
+                const text = await downloadDriveFile(fileId);
+                const visits = JSON.parse(text || '[]');
+                localStorage.setItem(POP_STORAGE_KEY, JSON.stringify(visits)); // cache hors-ligne
+                return visits;
+            }
+        } catch (e) {
+            driveLog('popVisitsLoad : lecture Drive impossible (' + e.message + '), repli local');
+        }
+    }
     try { return JSON.parse(localStorage.getItem(POP_STORAGE_KEY) || '[]'); }
     catch(e) { return []; }
 }
-function popVisitsSave(visits) {
+
+// Sauvegarde l'historique : toujours en cache local, et sur Drive si connecté (partage PC/Android)
+async function popVisitsSave(visits) {
     localStorage.setItem(POP_STORAGE_KEY, JSON.stringify(visits));
+    if (!driveToken) return;
+    try {
+        const content  = JSON.stringify(visits);
+        const folderId = await getOrCreateFolder(DRIVE_FOLDER);
+        const fileId   = await driveGetVisitsFileId();
+        if (fileId) {
+            await updateDriveFile(fileId, content, 'application/json');
+        } else {
+            driveFileIds.visites = await createDriveFile(folderId, POP_VISITS_FILE, content, 'application/json');
+        }
+    } catch (e) {
+        driveLog('popVisitsSave : écriture Drive impossible (' + e.message + ')');
+    }
 }
 
 // ISO week key : "2025-W23"
@@ -2214,27 +2266,27 @@ function isoWeekKey(date) {
     return `${year}-S${String(week).padStart(2,'0')}`;
 }
 
-function popRecordVisit(user) {
+async function popRecordVisit(user) {
     if (!user || POP_EXCLUDED.includes(user.toLowerCase())) return;
-    const visits = popVisitsLoad();
+    const visits = await popVisitsLoad();   // dernière version connue (Drive si possible)
     visits.push({ user, date: new Date().toISOString() });
-    popVisitsSave(visits);
-    popStatsRefresh();
+    await popVisitsSave(visits);
+    await popStatsRefresh();
 }
 
-function popStatsToggle() {
+async function popStatsToggle() {
     const panel = document.getElementById('popStatsPanel');
     const visible = panel.style.display !== 'none';
     if (!visible) {
-        popStatsRender();
+        await popStatsRender();
         panel.style.display = 'block';
     } else {
         panel.style.display = 'none';
     }
 }
 
-function popStatsRender() {
-    const visits = popVisitsLoad();
+async function popStatsRender() {
+    const visits = await popVisitsLoad();
     const byWeek = {};
     visits.forEach(v => {
         const wk = isoWeekKey(new Date(v.date));
@@ -2254,27 +2306,45 @@ function popStatsRender() {
     }).join('');
 }
 
-// ── Incrémente Visite dans csvData pour toutes les lignes du IdProprio courant
-function popIncrementVisite() {
+// ── Incrémente Visite pour le IdProprio courant, en repartant de la dernière
+//    valeur connue sur Drive : évite qu'un appareil écrase l'incrément de l'autre.
+async function popIncrementVisite() {
     if (!csvData || !currentIdLot) return false;
     const row = csvData.find(r => String(r.IdLot) === String(currentIdLot));
     if (!row || !row.IdProprio) return false;
     const idProprio = row.IdProprio;
-    csvData.forEach(r => {
-        if (r.IdProprio === idProprio) {
-            r.Visite = (parseInt(r.Visite) || 0) + 1;
+
+    // Valeur locale actuelle
+    let baseValue = 0;
+    csvData.forEach(r => { if (r.IdProprio === idProprio) baseValue = Math.max(baseValue, parseInt(r.Visite) || 0); });
+
+    // Recharger la valeur la plus fraîche depuis Drive avant d'incrémenter
+    // (au cas où l'autre appareil aurait incrémenté depuis le dernier chargement local)
+    if (driveToken && driveFileIds.csv) {
+        try {
+            const freshText = await downloadDriveFile(driveFileIds.csv);
+            const freshRows = await new Promise(resolve => {
+                Papa.parse(freshText, { header: true, skipEmptyLines: true, complete: r => resolve(r.data) });
+            });
+            freshRows.forEach(r => { if (r.IdProprio === idProprio) baseValue = Math.max(baseValue, parseInt(r.Visite) || 0); });
+        } catch (e) {
+            driveLog('popIncrementVisite : lecture fraîche impossible (' + e.message + '), valeur locale utilisée');
         }
-    });
+    }
+
+    const newValue = baseValue + 1;
+    csvData.forEach(r => { if (r.IdProprio === idProprio) r.Visite = newValue; });
+
     // Sauvegarder sur Drive si connecté
     if (driveToken && driveFileIds.csv) {
-        driveSave();
+        await driveSave();
     }
     return true;
 }
 
 // ── Affiche dans Total la valeur Visite du CSV pour le IdProprio courant
-function popStatsRefresh() {
-    // Total = valeur Visite du CSV pour le lot courant
+async function popStatsRefresh() {
+    // Total = valeur Visite du CSV pour le lot courant (compteur commun PC/Android)
     let total = '—';
     if (csvData && currentIdLot) {
         const row = csvData.find(r => String(r.IdLot) === String(currentIdLot));
@@ -2285,8 +2355,8 @@ function popStatsRefresh() {
     }
     document.getElementById('popStatTotal').textContent = total;
 
-    // Cette semaine = utilisateurs Geneanet distincts (non vides)
-    const visits = popVisitsLoad();
+    // Cette semaine = utilisateurs Geneanet distincts (non vides), partagé PC/Android via Drive
+    const visits = await popVisitsLoad();
     const thisWeek = isoWeekKey(new Date());
     const weekUsers = [...new Set(
         visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek && v.user && v.user.trim())
@@ -2295,20 +2365,21 @@ function popStatsRefresh() {
     document.getElementById('popStatWeek').textContent = weekUsers.length;
 }
 
-function openPopulation() {
+async function openPopulation() {
     const user = (document.getElementById('popUser').value || '').trim();
-
-    // Enregistrer la visite dans localStorage
-    if (user) popRecordVisit(user);
-
-    // Ouvrir Geneanet dans un nouvel onglet
     const base = user ? user.toLowerCase() : 'pract';
     const url  = `https://gw.geneanet.org/${base}_w?lang=fr&m=H&v=search_event`;
+
+    // Ouvrir Geneanet tout de suite, avant tout await, pour éviter que le
+    // navigateur mobile bloque la popup (elle doit rester liée au clic direct).
     window.open(url, '_blank', 'noopener');
 
-    // Incrémenter Visite dans le CSV et rafraîchir l'affichage
-    popIncrementVisite();
-    popStatsRefresh();
+    // Enregistrer la visite dans l'historique partagé (Drive + repli local hors-ligne)
+    if (user) await popRecordVisit(user);
+
+    // Incrémenter Visite (compteur commun PC/Android) et rafraîchir l'affichage
+    await popIncrementVisite();
+    await popStatsRefresh();
 }
 
 // ── INIT ─────────────────────────────────────────────
