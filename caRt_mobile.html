@@ -2287,21 +2287,27 @@ async function popStatsToggle() {
 
 async function popStatsRender() {
     const visits = await popVisitsLoad();
+    // Regroupe par semaine, puis par utilisateur -> nombre de visites (PC + Android confondus)
     const byWeek = {};
     visits.forEach(v => {
-        const wk = isoWeekKey(new Date(v.date));
-        if (!byWeek[wk]) byWeek[wk] = new Set();
-        byWeek[wk].add(v.user.toLowerCase());
+        if (!v.user || !v.user.trim()) return;
+        const wk   = isoWeekKey(new Date(v.date));
+        const user = v.user.toLowerCase().trim();
+        if (!byWeek[wk]) byWeek[wk] = {};
+        byWeek[wk][user] = (byWeek[wk][user] || 0) + 1;
     });
     const weeks = Object.keys(byWeek).sort().reverse();
     const content = document.getElementById('popStatsContent');
     if (weeks.length === 0) { content.innerHTML = '<em>Aucune visite enregistrée.</em>'; return; }
     content.innerHTML = weeks.map(wk => {
-        const users = [...byWeek[wk]].sort();
+        const counts      = byWeek[wk];
+        const users       = Object.keys(counts).sort();
+        const totalVisits = users.reduce((sum, u) => sum + counts[u], 0);
+        const detail      = users.map(u => `${u} (${counts[u]})`).join(', ');
         return `<div style="margin-bottom:6px">
             <span style="color:var(--accent3);font-weight:600">${wk}</span>
-            <span style="color:var(--text-muted)"> — ${users.length} visiteur${users.length > 1 ? 's' : ''} : </span>
-            <span style="color:#ddd">${users.join(', ')}</span>
+            <span style="color:var(--text-muted)"> — ${totalVisits} visite${totalVisits > 1 ? 's' : ''}, ${users.length} utilisateur${users.length > 1 ? 's' : ''} : </span>
+            <span style="color:#ddd">${detail}</span>
         </div>`;
     }).join('');
 }
