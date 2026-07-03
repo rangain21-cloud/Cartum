@@ -746,8 +746,10 @@ let activeFilterProprio = null;
 let driveToken   = null;      // access_token actif
 let driveFileIds = { svg: null, csv: null, visites: null };
 const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.googleusercontent.com';   // ← votre Client ID OAuth2 ici
-const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive';
+const DRIVE_API_KEY   = 'AIzaSyB5yMNGMQwig5h8FFKSeeDQ-rqJuhp7D98';   // ← clé API Google Cloud (requise par le sélecteur Picker) — voir instructions
+const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive.file';   // accès limité aux fichiers ouverts/créés par l'app (pas de vérification Google requise)
 const DRIVE_FOLDER    = 'Cartum';
+const DRIVE_FOLDER_ID_KEY = 'cartum_drive_folder_id';   // mémorise le dossier choisi une fois via le Picker
 let _tokenClient      = null; // google.accounts.oauth2.TokenClient
 let _gapiReady        = false;
 
@@ -1155,12 +1157,6 @@ function selectLotFromList(idLot) {
     const el   = allSvgElements.find(e => e._csvData && String(e._csvData.IdLot) === String(idLot));
     const data = csvData ? csvData.find(r => String(r.IdLot) === String(idLot)) : null;
     clearAllHighlights();
-    // Restore dim for current filter
-    if (activeFilterProprio) {
-        allSvgElements.forEach(e2 => {
-            e2.style.opacity = (e2._csvData && e2._csvData.IdProprio === activeFilterProprio) ? '' : '0.15';
-        });
-    }
     if (el) {
         hlSet(el, '#40E0D0', '#0000FF', '2px');
         if (data && data.IdProprio) {
@@ -1422,19 +1418,15 @@ function applyProprioFilter() {
 
     // Hide lot list if no owner selected
     if (!id) {
-        allSvgElements.forEach(el => el.style.opacity = '');
         renderProprioLots(null);
         return;
     }
 
-    // Highlight owner's lots on map
+    // Highlight owner's lots on map (les autres lots restent inchangés)
     allSvgElements.forEach(el => {
         const r = el._csvData;
         if (r && r.IdProprio === id) {
             hlSet(el, '#9b59b6', '#8e44ad', '2px');
-            el.style.opacity = '';
-        } else {
-            el.style.opacity = '0.15';
         }
     });
 
@@ -1497,7 +1489,6 @@ function renderProprioLots(idProprio) {
 
 function resetFilter() {
     clearAllHighlights();
-    allSvgElements.forEach(el => el.style.opacity = '');
     document.getElementById('idProprioFilter').value = '';
     activeFilterProprio = null;
     renderProprioLots(null);
@@ -1660,53 +1651,38 @@ async function driveLoad() {
         toast('Non connecté'); return;
     }
     setDriveStatus('Recherche dans Drive…');
-    driveLog(`driveLoad – recherche tous les dossiers "${DRIVE_FOLDER}"…`);
+    driveLog(`driveLoad – résolution du dossier "${DRIVE_FOLDER}"…`);
     try {
-        // ── Étape 1 : trouver TOUS les dossiers nommés DRIVE_FOLDER ──
-        const folderParams = new URLSearchParams({
-            q: `name = '${DRIVE_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-            spaces: 'drive', fields: 'files(id,name)', pageSize: '20'
-        });
-        const folderR = await fetch(`https://www.googleapis.com/drive/v3/files?${folderParams}`, {
-            headers: { Authorization: 'Bearer ' + driveToken }
-        });
-        const folderD = await folderR.json();
-        const folders = folderD.files || [];
-        driveLog(`  ${folders.length} dossier(s) "${DRIVE_FOLDER}"`);
-
-        if (folders.length === 0) {
+        // ── Étape 1 : résoudre le dossier Cartum (mémorisé ou choisi via le Picker) ──
+        let folderId;
+        try {
+            folderId = await getOrCreateFolder(DRIVE_FOLDER);
+        } catch (e) {
             setDriveStatus(`Dossier "${DRIVE_FOLDER}" introuvable`, 'error');
-            driveLog(`  ✗ Créez un dossier "${DRIVE_FOLDER}" sur Drive avec vos fichiers`);
-            toast(`Dossier "${DRIVE_FOLDER}" introuvable`);
+            driveLog(`  ✗ ${e.message}`);
+            toast(`Dossier "${DRIVE_FOLDER}" non sélectionné`);
             return;
         }
 
-        // ── Étape 2 : collecter tous les SVG et CSV de tous les dossiers ──
-        let allSvgFiles = [], allCsvFiles = [], realFolderId = null;
+        // ── Étape 2 : collecter les SVG et CSV du dossier ──
+        let allSvgFiles = [], allCsvFiles = [];
 
-        for (const folder of folders) {
-            const listParams = new URLSearchParams({
-                q: `'${folder.id}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
-                fields: 'files(id,name)', pageSize: '50'
-            });
-            const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, {
-                headers: { Authorization: 'Bearer ' + driveToken }
-            });
-            const listD = await listR.json();
-            const files = listD.files || [];
-            driveLog(`  Dossier id=${folder.id} → ${files.map(f=>f.name).join(', ') || 'vide'}`);
+        const listParams = new URLSearchParams({
+            q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+            fields: 'files(id,name)', pageSize: '50'
+        });
+        const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        const listD = await listR.json();
+        const files = listD.files || [];
+        driveLog(`  Dossier id=${folderId} → ${files.map(f=>f.name).join(', ') || 'vide'}`);
 
-            files.forEach(f => {
-                const lc = f.name.toLowerCase();
-                if (lc.endsWith('.svg')) allSvgFiles.push({ ...f, folderId: folder.id });
-                if (lc.endsWith('.csv')) allCsvFiles.push({ ...f, folderId: folder.id });
-            });
-            if (!realFolderId && (files.some(f=>f.name.toLowerCase().endsWith('.svg')) || files.some(f=>f.name.toLowerCase().endsWith('.csv')))) {
-                realFolderId = folder.id;
-            }
-        }
-
-        if (realFolderId) { _cachedFolderId = realFolderId; }
+        files.forEach(f => {
+            const lc = f.name.toLowerCase();
+            if (lc.endsWith('.svg')) allSvgFiles.push({ ...f, folderId });
+            if (lc.endsWith('.csv')) allCsvFiles.push({ ...f, folderId });
+        });
 
         if (allSvgFiles.length === 0 && allCsvFiles.length === 0) {
             setDriveStatus(`Aucun .svg/.csv dans "${DRIVE_FOLDER}"`, 'error');
@@ -1847,17 +1823,14 @@ async function pickCsvFromDrive() {
     }
     try {
         setLocalStatus('Recherche CSV sur Drive…', '');
-        const folderId = _cachedFolderId || await (async () => {
-            const p = new URLSearchParams({
-                q: `name = '${DRIVE_FOLDER}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-                spaces: 'drive', fields: 'files(id)', pageSize: '5'
-            });
-            const r = await fetch(`https://www.googleapis.com/drive/v3/files?${p}`, {
-                headers: { Authorization: 'Bearer ' + driveToken }
-            });
-            const d = await r.json();
-            return d.files?.[0]?.id || null;
-        })();
+        let folderId;
+        try {
+            folderId = await getOrCreateFolder(DRIVE_FOLDER);
+        } catch (e) {
+            toast(`Dossier "${DRIVE_FOLDER}" non sélectionné`);
+            setLocalStatus('', '');
+            return;
+        }
 
         if (!folderId) {
             toast(`Dossier "${DRIVE_FOLDER}" introuvable`);
@@ -2008,8 +1981,9 @@ async function searchDriveByType(ext) {
     // Use URLSearchParams to encode only the value, not the whole URL.
     // "name contains 'svg'" works; the dot must be excluded from the contains clause.
     const extNoDot = ext.replace('.', '');  // 'svg' or 'csv'
+    const folderId = await getOrCreateFolder(DRIVE_FOLDER);   // scope drive.file : recherche limitée au dossier choisi
     const params = new URLSearchParams({
-        q: `name contains '${extNoDot}' and trashed = false`,
+        q: `'${folderId}' in parents and name contains '${extNoDot}' and trashed = false`,
         fields: 'files(id,name,mimeType,parents)',
         orderBy: 'modifiedTime desc',
         pageSize: '20'
@@ -2030,74 +2004,95 @@ async function searchDriveByType(ext) {
 let _cachedFolderId = null;
 
 async function getOrCreateFolder(name) {
-    // Retourner le cache si disponible
+    // Retourner le cache mémoire si disponible
     if (_cachedFolderId) {
-        driveLog(`  getOrCreateFolder : cache → id=${_cachedFolderId}`);
+        driveLog(`  getOrCreateFolder : cache mémoire → id=${_cachedFolderId}`);
         return _cachedFolderId;
     }
 
-    // Chercher TOUS les dossiers portant ce nom dans My Drive
-    const params = new URLSearchParams({
-        q: `name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-        spaces: 'drive',
-        fields: 'files(id,name,parents)'
-    });
-    const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
-        headers: { Authorization: 'Bearer ' + driveToken }
-    });
-    if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(`getFolder ${r.status}: ${d?.error?.message || r.statusText}`);
-    }
-    const d = await r.json();
-    const folders = d.files || [];
-    driveLog(`  getOrCreateFolder("${name}") : ${folders.length} dossier(s) trouvé(s)`);
-
-    if (folders.length === 0) {
-        // Créer le dossier à la racine
-        driveLog(`  → dossier "${name}" absent, création à la racine…`);
-        const cr = await fetch('https://www.googleapis.com/drive/v3/files', {
-            method: 'POST',
-            headers: { Authorization: 'Bearer ' + driveToken, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder' })
-        });
-        const cd = await cr.json();
-        if (!cr.ok) throw new Error(`createFolder ${cr.status}: ${cd?.error?.message || cr.statusText}`);
-        driveLog(`  → dossier "${name}" créé id=${cd.id}`);
-        _cachedFolderId = cd.id;
-        return _cachedFolderId;
-    }
-
-    if (folders.length === 1) {
-        driveLog(`  → 1 dossier trouvé id=${folders[0].id}`);
-        _cachedFolderId = folders[0].id;
-        return _cachedFolderId;
-    }
-
-    // Plusieurs dossiers : chercher celui qui contient un .svg ou .csv
-    driveLog(`  → ${folders.length} dossiers "${name}" trouvés, recherche du bon…`);
-    for (const folder of folders) {
-        const p2 = new URLSearchParams({
-            q: `'${folder.id}' in parents and trashed = false and (name contains '.svg' or name contains '.csv')`,
-            fields: 'files(id,name)'
-        });
-        const r2 = await fetch(`https://www.googleapis.com/drive/v3/files?${p2}`, {
-            headers: { Authorization: 'Bearer ' + driveToken }
-        });
-        const d2 = await r2.json();
-        const count = d2.files?.length || 0;
-        driveLog(`    dossier id=${folder.id} : ${count} fichier(s) svg/csv`);
-        if (count > 0) {
-            driveLog(`  → dossier retenu id=${folder.id}`);
-            _cachedFolderId = folder.id;
-            return _cachedFolderId;
+    // Retrouver l'id mémorisé lors d'une sélection précédente via le Picker
+    const savedId = localStorage.getItem(DRIVE_FOLDER_ID_KEY);
+    if (savedId) {
+        try {
+            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${savedId}?fields=id,name,trashed`, {
+                headers: { Authorization: 'Bearer ' + driveToken }
+            });
+            if (r.ok) {
+                const d = await r.json();
+                if (!d.trashed) {
+                    driveLog(`  getOrCreateFolder : id mémorisé valide → ${d.id} (${d.name})`);
+                    _cachedFolderId = d.id;
+                    return _cachedFolderId;
+                }
+            }
+        } catch (e) {
+            driveLog('  getOrCreateFolder : id mémorisé invalide (' + e.message + ')');
         }
     }
 
-    // Aucun dossier ne contient de fichiers : prendre le premier
-    driveLog(`  → aucun dossier avec svg/csv, on prend le premier id=${folders[0].id}`);
-    _cachedFolderId = folders[0].id;
+    // Sous le scope drive.file, l'app ne peut plus retrouver un dossier par son nom :
+    // il faut que l'utilisateur le désigne une fois via le sélecteur natif Google.
+    driveLog(`  getOrCreateFolder : ouverture du sélecteur Google pour choisir "${name}"…`);
+    const pickedId = await pickDriveFolder();
+    if (!pickedId) throw new Error(`Aucun dossier "${name}" sélectionné`);
+
+    localStorage.setItem(DRIVE_FOLDER_ID_KEY, pickedId);
+    _cachedFolderId = pickedId;
+    driveLog(`  getOrCreateFolder : dossier choisi → id=${pickedId}`);
     return _cachedFolderId;
+}
+
+// ── Sélecteur Google natif (Picker) pour désigner le dossier Cartum ──
+// Nécessaire une seule fois : sous le scope "drive.file", l'app n'a accès
+// qu'aux fichiers créés par elle-même OU explicitement choisis ici.
+let _pickerApiLoaded = false;
+function loadPickerApi() {
+    return new Promise(resolve => {
+        if (_pickerApiLoaded) return resolve();
+        gapi.load('picker', () => { _pickerApiLoaded = true; resolve(); });
+    });
+}
+
+function pickDriveFolder() {
+    return new Promise(async (resolve, reject) => {
+        if (!DRIVE_API_KEY) {
+            toast('DRIVE_API_KEY non configurée — voir instructions');
+            reject(new Error('DRIVE_API_KEY manquante'));
+            return;
+        }
+        try {
+            await loadPickerApi();
+            const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+                .setSelectFolderEnabled(true)
+                .setIncludeFolders(true)
+                .setMimeTypes('application/vnd.google-apps.folder');
+            const picker = new google.picker.PickerBuilder()
+                .setOAuthToken(driveToken)
+                .setDeveloperKey(DRIVE_API_KEY)
+                .addView(view)
+                .setTitle('Choisissez votre dossier Cartum sur Drive')
+                .setCallback(data => {
+                    if (data.action === google.picker.Action.PICKED) {
+                        resolve(data.docs[0].id);
+                    } else if (data.action === google.picker.Action.CANCEL) {
+                        resolve(null);
+                    }
+                })
+                .build();
+            picker.setVisible(true);
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+// Permet de choisir un autre dossier Cartum (bouton dédié, à ajouter si besoin)
+function driveChangeFolder() {
+    localStorage.removeItem(DRIVE_FOLDER_ID_KEY);
+    _cachedFolderId = null;
+    driveFileIds = { svg: null, csv: null, visites: null };
+    toast('Choisissez à nouveau votre dossier Cartum');
+    driveLoad();
 }
 
 async function listDriveFiles(folderId) {
