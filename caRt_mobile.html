@@ -1676,13 +1676,13 @@ async function driveLoad() {
         setDriveStatus('Choix du fichier SVG…');
         driveLog(`  Ouverture du Picker (SVG) dans le dossier id=${folderId}…`);
         const svgDoc = await pickDriveFileOfType(folderId, 'image/svg+xml', '🗺 Choisissez la carte SVG dans "Cartum"');
-        if (svgDoc) driveLog(`  SVG choisi : ${svgDoc.name}`);
+        if (svgDoc) driveLog(`  SVG choisi : ${svgDoc.name} (resourceKey=${svgDoc.resourceKey || 'aucun'})`);
         else driveLog('  SVG : aucune sélection (annulé)');
 
         setDriveStatus('Choix du fichier CSV…');
         driveLog(`  Ouverture du Picker (CSV) dans le dossier id=${folderId}…`);
         const csvDoc = await pickDriveFileOfType(folderId, 'text/csv,text/plain', '📋 Choisissez la légende CSV dans "Cartum"');
-        if (csvDoc) driveLog(`  CSV choisi : ${csvDoc.name}`);
+        if (csvDoc) driveLog(`  CSV choisi : ${csvDoc.name} (resourceKey=${csvDoc.resourceKey || 'aucun'})`);
         else driveLog('  CSV : aucune sélection (annulé)');
 
         if (!svgDoc && !csvDoc) {
@@ -1693,7 +1693,7 @@ async function driveLoad() {
         // ── Étape 3 : télécharger les fichiers choisis ─────────────
         if (svgDoc) {
             driveLog(`  Téléchargement SVG "${svgDoc.name}"…`);
-            const text = await downloadDriveFile(svgDoc.id);
+            const text = await downloadDriveFile(svgDoc.id, svgDoc.resourceKey);
             svgData = text; driveFileIds.svg = svgDoc.id;
             renderSvg();
             driveLog(`  ✓ SVG chargé (${text.length} octets)`);
@@ -1701,7 +1701,7 @@ async function driveLoad() {
         }
         if (csvDoc) {
             driveLog(`  Téléchargement CSV "${csvDoc.name}"…`);
-            const text = await downloadDriveFile(csvDoc.id);
+            const text = await downloadDriveFile(csvDoc.id, csvDoc.resourceKey);
             originalCsvFileName = csvDoc.name; driveFileIds.csv = csvDoc.id;
             parseCsv(text);
             driveLog(`  ✓ CSV chargé (${text.length} octets)`);
@@ -2149,10 +2149,16 @@ async function listDriveFiles(folderId) {
     return d.files || [];
 }
 
-async function downloadDriveFile(fileId) {
-    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-        headers: { Authorization: 'Bearer ' + driveToken }
-    });
+async function downloadDriveFile(fileId, resourceKey) {
+    const headers = { Authorization: 'Bearer ' + driveToken };
+    // Depuis 2021, certains fichiers Drive exigent cette clé en plus du token
+    // (sinon l'API répond 404 même avec un accès valide au fichier).
+    if (resourceKey) headers['X-Goog-Drive-Resource-Keys'] = `${fileId}/${resourceKey}`;
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers });
+    if (!r.ok) {
+        const errText = await r.text().catch(() => '');
+        throw new Error(`downloadDriveFile ${r.status}: ${errText.slice(0, 200) || r.statusText}`);
+    }
     return r.text();
 }
 
