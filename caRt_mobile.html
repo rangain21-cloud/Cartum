@@ -490,6 +490,7 @@
                     <button class="btn btn-primary" onclick="driveConnect()">🔗 Connecter</button>
                     <button class="btn btn-warning" id="btnDriveLoad" onclick="driveLoad()" disabled>⬇ Charger depuis Drive</button>
                     <button class="btn btn-success" id="btnDriveSave" onclick="driveSave()" disabled>⬆ Sauvegarder sur Drive</button>
+                    <button class="btn btn-muted btn-sm" id="btnDriveChangeFolder" onclick="driveChangeFolder()" disabled>🔁 Changer de dossier</button>
                     <button class="btn btn-warning btn-sm" onclick="driveTest()" style="display:none">🧪 TEST DRIVE</button>
                 </div>
                 <div class="divider"></div>
@@ -1601,8 +1602,9 @@ function driveConnect() {
         return;
     }
     driveLog('Demande token via popup GIS…');
-    // prompt:'select_account' force le sélecteur de compte
-    _tokenClient.requestAccessToken({ prompt: driveToken ? '' : 'consent' });
+    // 'select_account' force juste le sélecteur de compte ; Google ne réaffiche
+    // l'écran de consentement complet que si l'autorisation n'a pas déjà été accordée.
+    _tokenClient.requestAccessToken({ prompt: 'select_account' });
 }
 
 function checkDriveCallback() {
@@ -1626,6 +1628,7 @@ function _driveConnected() {
     setDriveStatus('Connecté à Google Drive ✓', 'connected');
     document.getElementById('btnDriveLoad').disabled = false;
     document.getElementById('btnDriveSave').disabled = false;
+    document.getElementById('btnDriveChangeFolder').disabled = false;
     toast('Google Drive connecté ✓');
 }
 
@@ -2086,7 +2089,9 @@ function pickDriveFolder() {
     });
 }
 
-// Permet de choisir un autre dossier Cartum (bouton dédié, à ajouter si besoin)
+// Permet de choisir un autre dossier Cartum, ou de ré-autoriser le contenu
+// actuel du même dossier si de nouveaux fichiers y ont été ajoutés depuis
+// la dernière sélection (nécessaire sous le scope drive.file).
 function driveChangeFolder() {
     localStorage.removeItem(DRIVE_FOLDER_ID_KEY);
     _cachedFolderId = null;
