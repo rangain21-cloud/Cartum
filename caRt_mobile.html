@@ -620,8 +620,9 @@
                 </div>
                 <div id="popStatsPanel" style="display:none;background:var(--bg-dark);border-radius:8px;padding:10px;margin-top:8px;max-height:200px;overflow-y:auto">
                     <div id="popStatsContent" style="font-size:0.78rem;color:var(--text-muted);line-height:1.7"></div>
-                    <div style="margin-top:10px;text-align:right">
-                        <button class="btn btn-sm" style="background:#5a2222;color:#f5a3a3" onclick="popVisitsClear()">🗑 Nettoyer l'historique</button>
+                    <div style="margin-top:10px;text-align:right;display:flex;gap:8px;justify-content:flex-end">
+                        <button class="btn btn-sm btn-muted" onclick="openVisitsCleanModal()">🧹 Nettoyer sur Drive…</button>
+                        <button class="btn btn-sm" style="background:#5a2222;color:#f5a3a3" onclick="popVisitsClear()">🗑 Nettoyer local</button>
                     </div>
                 </div>
             </div>
@@ -714,6 +715,25 @@
         <div class="modal-btns">
             <button class="btn btn-sm" style="background:var(--accent3);color:#000;font-weight:600" onclick="closeDrivePickerModal()">Annuler</button>
             <button class="btn btn-sm btn-primary" id="drivePickerConfirm" onclick="drivePickerConfirm()" disabled>⬇ Charger</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE NETTOYAGE SÉLECTIF visites.json (Drive) ═══════════════ -->
+<div class="modal" id="visitsCleanModal">
+    <div class="modal-box" style="max-width:420px">
+        <div class="modal-title" style="color:var(--accent3)">🧹 Nettoyer visites.json (Drive)</div>
+        <p style="font-size:0.78rem;color:var(--text-muted);margin-top:-6px;margin-bottom:10px">
+            Cochez les entrées (semaine + utilisateur) à supprimer, puis validez. Le fichier sur Drive sera mis à jour.
+        </p>
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+            <button class="btn btn-muted btn-sm" onclick="visitsCleanToggleAll(true)">Tout cocher</button>
+            <button class="btn btn-muted btn-sm" onclick="visitsCleanToggleAll(false)">Tout décocher</button>
+        </div>
+        <div id="visitsCleanList" style="display:flex;flex-direction:column;gap:4px;max-height:50vh;overflow-y:auto"></div>
+        <div class="modal-btns" style="margin-top:12px">
+            <button class="btn btn-sm" style="background:var(--accent3);color:#000;font-weight:600" onclick="closeVisitsCleanModal()">Annuler</button>
+            <button class="btn btn-sm" style="background:#5a2222;color:#f5a3a3" id="visitsCleanConfirm" onclick="visitsCleanConfirm()" disabled>🗑 Supprimer la sélection</button>
         </div>
     </div>
 </div>
@@ -2334,6 +2354,80 @@ async function popVisitsClear() {
     await popStatsRender();   // rafraîchit le panneau Historique
     await popStatsRefresh();  // rafraîchit les compteurs
     toast('Cache local des visites effacé');
+}
+
+// ── Nettoyage sélectif de visites.json (Drive) ──────────────────────
+// Contrairement à popVisitsClear() (local uniquement), ceci modifie
+// réellement le fichier partagé sur Drive — après choix explicite de
+// l'utilisateur des entrées (semaine + utilisateur) à supprimer.
+let _visitsCleanAll = [];   // toutes les visites brutes chargées pour la modale
+
+async function openVisitsCleanModal() {
+    _visitsCleanAll = await popVisitsLoad();
+
+    // Regroupe par (semaine, utilisateur) pour affichage compact avec compteur
+    const byKey = {};
+    _visitsCleanAll.forEach(v => {
+        if (!v.user || !v.user.trim()) return;
+        const wk  = isoWeekKey(new Date(v.date));
+        const usr = v.user.toLowerCase().trim();
+        const key = wk + '|' + usr;
+        byKey[key] = (byKey[key] || 0) + 1;
+    });
+    const keys = Object.keys(byKey).sort().reverse();   // semaine décroissante
+
+    const list = document.getElementById('visitsCleanList');
+    if (keys.length === 0) {
+        list.innerHTML = '<span style="font-size:0.78rem;color:var(--text-muted)">Aucune visite enregistrée.</span>';
+    } else {
+        list.innerHTML = keys.map(key => {
+            const [wk, usr] = key.split('|');
+            const count = byKey[key];
+            return `<label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;color:#ddd;padding:4px 2px;cursor:pointer">
+                <input type="checkbox" class="visitsCleanChk" data-key="${key}" onchange="visitsCleanUpdateConfirmState()">
+                <span style="color:var(--accent3);font-weight:600">${wk}</span>
+                <span>${usr} (${count})</span>
+            </label>`;
+        }).join('');
+    }
+    visitsCleanUpdateConfirmState();
+    document.getElementById('visitsCleanModal').classList.add('open');
+}
+
+function visitsCleanToggleAll(checked) {
+    document.querySelectorAll('.visitsCleanChk').forEach(cb => cb.checked = checked);
+    visitsCleanUpdateConfirmState();
+}
+
+function visitsCleanUpdateConfirmState() {
+    const anyChecked = !!document.querySelector('.visitsCleanChk:checked');
+    document.getElementById('visitsCleanConfirm').disabled = !anyChecked;
+}
+
+function closeVisitsCleanModal() {
+    document.getElementById('visitsCleanModal').classList.remove('open');
+}
+
+async function visitsCleanConfirm() {
+    const checkedKeys = [...document.querySelectorAll('.visitsCleanChk:checked')].map(cb => cb.dataset.key);
+    if (checkedKeys.length === 0) return;
+    if (!confirm(`Supprimer ${checkedKeys.length} entrée(s) de visites.json sur Drive ?\nCette action modifie le fichier partagé.`)) return;
+
+    const keySet = new Set(checkedKeys);
+    const remaining = _visitsCleanAll.filter(v => {
+        if (!v.user || !v.user.trim()) return true;   // on garde les entrées mal formées, non affichées
+        const wk  = isoWeekKey(new Date(v.date));
+        const usr = v.user.toLowerCase().trim();
+        return !keySet.has(wk + '|' + usr);
+    });
+
+    await popVisitsSave(remaining);   // écrit sur Drive (et met à jour le cache local au passage)
+    driveLog(`visitsCleanConfirm : ${checkedKeys.length} entrée(s) supprimée(s) de visites.json`);
+
+    closeVisitsCleanModal();
+    await popStatsRender();
+    await popStatsRefresh();
+    toast('visites.json mis à jour sur Drive');
 }
 
 // ISO week key : "2025-W23"
