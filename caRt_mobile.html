@@ -1653,7 +1653,7 @@ async function driveLoad() {
         driveLog('driveLoad : driveToken absent');
         toast('Non connecté'); return;
     }
-    setDriveStatus('Recherche dans Drive…');
+    setDriveStatus('Résolution du dossier…');
     driveLog(`driveLoad – résolution du dossier "${DRIVE_FOLDER}"…`);
     try {
         // ── Étape 1 : résoudre le dossier Cartum (mémorisé ou choisi via le Picker) ──
@@ -1667,54 +1667,48 @@ async function driveLoad() {
             return;
         }
 
-        // ── Étape 2 : collecter les SVG et CSV du dossier ──
-        let allSvgFiles = [], allCsvFiles = [];
+        // ── Étape 2 : choisir directement les fichiers via le Picker Google ──
+        // IMPORTANT : sous le scope drive.file, sélectionner le DOSSIER seul ne
+        // donne PAS accès à la liste de son contenu existant (c'est documenté et
+        // volontaire côté Google). Chaque fichier doit être choisi individuellement
+        // dans le Picker pour devenir accessible à l'app. On ouvre donc le Picker
+        // directement dans ce dossier et on laisse choisir le(s) fichier(s).
+        setDriveStatus('Choisissez le(s) fichier(s)…');
+        driveLog(`  Ouverture du Picker dans le dossier id=${folderId}…`);
+        const picked = await pickDriveFilesInFolder(folderId);
+        if (!picked) { setDriveStatus('Chargement annulé', ''); return; }
+        if (picked.length === 0) {
+            setDriveStatus('Aucun fichier sélectionné', 'error');
+            return;
+        }
+        driveLog(`  Sélection : ${picked.map(f => f.name).join(', ')}`);
 
-        const listParams = new URLSearchParams({
-            q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
-            fields: 'files(id,name)', pageSize: '50'
-        });
-        const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, {
-            headers: { Authorization: 'Bearer ' + driveToken }
-        });
-        const listD = await listR.json();
-        const files = listD.files || [];
-        driveLog(`  Dossier id=${folderId} → ${files.map(f=>f.name).join(', ') || 'vide'}`);
-
-        files.forEach(f => {
-            const lc = f.name.toLowerCase();
-            if (lc.endsWith('.svg')) allSvgFiles.push({ ...f, folderId });
-            if (lc.endsWith('.csv')) allCsvFiles.push({ ...f, folderId });
-        });
-
-        if (allSvgFiles.length === 0 && allCsvFiles.length === 0) {
-            setDriveStatus(`Aucun .svg/.csv dans "${DRIVE_FOLDER}"`, 'error');
-            toast(`Aucun fichier dans "${DRIVE_FOLDER}"`);
+        const svgDoc = picked.find(f => f.name.toLowerCase().endsWith('.svg'));
+        const csvDoc = picked.find(f => f.name.toLowerCase().endsWith('.csv'));
+        if (!svgDoc && !csvDoc) {
+            setDriveStatus('Sélectionnez un fichier .svg et/ou .csv', 'error');
+            toast('Aucun .svg/.csv parmi la sélection');
             return;
         }
 
-        // ── Étape 3 : afficher la modale de choix ─────────────────
-        const chosen = await drivePickerModal(allSvgFiles, allCsvFiles);
-        if (!chosen) { setDriveStatus('Chargement annulé', ''); return; }
-
-        // ── Étape 4 : télécharger les fichiers choisis ─────────────
-        if (chosen.svg) {
-            driveLog(`  Téléchargement SVG "${chosen.svg.name}"…`);
-            const text = await downloadDriveFile(chosen.svg.id);
-            svgData = text; driveFileIds.svg = chosen.svg.id;
+        // ── Étape 3 : télécharger les fichiers choisis ─────────────
+        if (svgDoc) {
+            driveLog(`  Téléchargement SVG "${svgDoc.name}"…`);
+            const text = await downloadDriveFile(svgDoc.id);
+            svgData = text; driveFileIds.svg = svgDoc.id;
             renderSvg();
             driveLog(`  ✓ SVG chargé (${text.length} octets)`);
-            toast(`SVG chargé : ${chosen.svg.name}`);
+            toast(`SVG chargé : ${svgDoc.name}`);
         }
-        if (chosen.csv) {
-            driveLog(`  Téléchargement CSV "${chosen.csv.name}"…`);
-            const text = await downloadDriveFile(chosen.csv.id);
-            originalCsvFileName = chosen.csv.name; driveFileIds.csv = chosen.csv.id;
+        if (csvDoc) {
+            driveLog(`  Téléchargement CSV "${csvDoc.name}"…`);
+            const text = await downloadDriveFile(csvDoc.id);
+            originalCsvFileName = csvDoc.name; driveFileIds.csv = csvDoc.id;
             parseCsv(text);
             driveLog(`  ✓ CSV chargé (${text.length} octets)`);
-            toast(`CSV chargé : ${chosen.csv.name}`);
+            toast(`CSV chargé : ${csvDoc.name}`);
         }
-        setDriveStatus(`✓ ${chosen.svg ? chosen.svg.name : '—'} / ${chosen.csv ? chosen.csv.name : '—'}`, 'connected');
+        setDriveStatus(`✓ ${svgDoc ? svgDoc.name : '—'} / ${csvDoc ? csvDoc.name : '—'}`, 'connected');
 
     } catch(e) {
         driveLog(`  ✗ ERREUR : ${e.message}`);
@@ -2077,6 +2071,44 @@ function pickDriveFolder() {
                 .setCallback(data => {
                     if (data.action === google.picker.Action.PICKED) {
                         resolve(data.docs[0].id);
+                    } else if (data.action === google.picker.Action.CANCEL) {
+                        resolve(null);
+                    }
+                })
+                .build();
+            picker.setVisible(true);
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+// ── Sélecteur Google natif (Picker) pour choisir directement les fichiers ──
+// à l'intérieur du dossier Cartum. Sous le scope drive.file, c'est la seule
+// façon d'obtenir l'accès à des fichiers déjà existants (la sélection du
+// dossier seul ne suffit pas) : chaque fichier choisi ici devient accessible.
+function pickDriveFilesInFolder(folderId) {
+    return new Promise(async (resolve, reject) => {
+        if (!DRIVE_API_KEY) {
+            toast('DRIVE_API_KEY non configurée — voir instructions');
+            reject(new Error('DRIVE_API_KEY manquante'));
+            return;
+        }
+        try {
+            await loadPickerApi();
+            const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+                .setParent(folderId)
+                .setIncludeFolders(false)
+                .setSelectFolderEnabled(false);
+            const picker = new google.picker.PickerBuilder()
+                .setOAuthToken(driveToken)
+                .setDeveloperKey(DRIVE_API_KEY)
+                .addView(view)
+                .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
+                .setTitle('Choisissez le(s) fichier(s) SVG et/ou CSV dans "Cartum"')
+                .setCallback(data => {
+                    if (data.action === google.picker.Action.PICKED) {
+                        resolve(data.docs || []);
                     } else if (data.action === google.picker.Action.CANCEL) {
                         resolve(null);
                     }
