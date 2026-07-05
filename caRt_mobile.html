@@ -615,6 +615,7 @@
                 </div>
                 <div id="popStatsBar" style="display:flex;gap:10px;font-size:0.82rem;color:var(--text-muted);margin-bottom:4px">
                     <span>Total : <strong id="popStatTotal" style="color:var(--accent)">—</strong></span>
+                    <span>Proprio : <strong id="popStatProprio" style="color:var(--accent2, #f7b955)">0</strong></span>
                     <span>visiteurs : <strong id="popStatWeek" style="color:var(--accent3)">0</strong></span>
                 </div>
                 <div id="popStatsPanel" style="display:none;background:var(--bg-dark);border-radius:8px;padding:10px;margin-top:8px;max-height:200px;overflow-y:auto">
@@ -2343,26 +2344,26 @@ async function popStatsToggle() {
 
 async function popStatsRender() {
     const visits = await popVisitsLoad();
-    // Regroupe par semaine, puis par utilisateur -> nombre de visites (PC + Android confondus)
-    const byWeek = {};
+    // Regroupe par utilisateur, puis par semaine -> nombre de visites (PC + Android confondus)
+    const byUser = {};
     visits.forEach(v => {
         if (!v.user || !v.user.trim()) return;
         const wk   = isoWeekKey(new Date(v.date));
         const user = v.user.toLowerCase().trim();
-        if (!byWeek[wk]) byWeek[wk] = {};
-        byWeek[wk][user] = (byWeek[wk][user] || 0) + 1;
+        if (!byUser[user]) byUser[user] = {};
+        byUser[user][wk] = (byUser[user][wk] || 0) + 1;
     });
-    const weeks = Object.keys(byWeek).sort().reverse();
+    const users = Object.keys(byUser).sort();
     const content = document.getElementById('popStatsContent');
-    if (weeks.length === 0) { content.innerHTML = '<em>Aucune visite enregistrée.</em>'; return; }
-    content.innerHTML = weeks.map(wk => {
-        const counts      = byWeek[wk];
-        const users       = Object.keys(counts).sort();
-        const totalVisits = users.reduce((sum, u) => sum + counts[u], 0);
-        const detail      = users.map(u => `${u} (${counts[u]})`).join(', ');
+    if (users.length === 0) { content.innerHTML = '<em>Aucune visite enregistrée.</em>'; return; }
+    content.innerHTML = users.map(user => {
+        const counts      = byUser[user];
+        const weeks       = Object.keys(counts).sort().reverse();
+        const totalVisits = weeks.reduce((sum, wk) => sum + counts[wk], 0);
+        const detail      = weeks.map(wk => `${wk} (${counts[wk]})`).join(', ');
         return `<div style="margin-bottom:6px">
-            <span style="color:var(--accent3);font-weight:600">${wk}</span>
-            <span style="color:var(--text-muted)"> — ${totalVisits} visite${totalVisits > 1 ? 's' : ''}, ${users.length} utilisateur${users.length > 1 ? 's' : ''} : </span>
+            <span style="color:var(--accent3);font-weight:600">${user}</span>
+            <span style="color:var(--text-muted)"> — ${totalVisits} visite${totalVisits > 1 ? 's' : ''}, ${weeks.length} semaine${weeks.length > 1 ? 's' : ''} : </span>
             <span style="color:#ddd">${detail}</span>
         </div>`;
     }).join('');
@@ -2416,6 +2417,20 @@ async function popStatsRefresh() {
         }
     }
     document.getElementById('popStatTotal').textContent = total;
+
+    // Proprio = somme des Visite pour chaque IdProprio distinct (une seule fois par
+    // propriétaire, même s'il possède plusieurs lots) → total global toutes visites confondues
+    let proprioTotal = 0;
+    if (csvData) {
+        const seen = new Set();
+        csvData.forEach(r => {
+            if (r.IdProprio && !seen.has(r.IdProprio)) {
+                seen.add(r.IdProprio);
+                proprioTotal += parseInt(r.Visite) || 0;
+            }
+        });
+    }
+    document.getElementById('popStatProprio').textContent = proprioTotal;
 
     // Cette semaine = utilisateurs Geneanet distincts (non vides), partagé PC/Android via Drive
     const visits = await popVisitsLoad();
