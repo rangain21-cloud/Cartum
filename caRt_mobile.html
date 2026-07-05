@@ -620,6 +620,9 @@
                 </div>
                 <div id="popStatsPanel" style="display:none;background:var(--bg-dark);border-radius:8px;padding:10px;margin-top:8px;max-height:200px;overflow-y:auto">
                     <div id="popStatsContent" style="font-size:0.78rem;color:var(--text-muted);line-height:1.7"></div>
+                    <div style="margin-top:10px;text-align:right">
+                        <button class="btn btn-sm" style="background:#5a2222;color:#f5a3a3" onclick="popVisitsClear()">🗑 Nettoyer l'historique</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2316,6 +2319,21 @@ async function popVisitsSave(visits) {
     } catch (e) {
         driveLog('popVisitsSave : écriture Drive impossible (' + e.message + ')');
     }
+}
+
+// ── Nettoyage manuel du repli local (localStorage) ──────────────────
+// Ne touche PAS à visites.json sur Drive (nettoyage fait manuellement par
+// l'utilisateur en dehors de l'application) ; vide uniquement le cache
+// hors-ligne de cet appareil.
+async function popVisitsClear() {
+    if (!confirm('Vider le cache local (localStorage) des visites Geneanet sur cet appareil ?\nLe fichier visites.json sur Drive n\'est pas modifié.')) return;
+
+    localStorage.removeItem(POP_STORAGE_KEY);
+    driveLog('popVisitsClear : localStorage effacé (visites.json sur Drive non modifié)');
+
+    await popStatsRender();   // rafraîchit le panneau Historique
+    await popStatsRefresh();  // rafraîchit les compteurs
+    toast('Cache local des visites effacé');
 }
 
 // ISO week key : "2025-W23"
