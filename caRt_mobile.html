@@ -752,7 +752,7 @@ const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.goog
 // mais l'autorisation sur le fichier n'est jamais enregistrée → 404 au téléchargement).
 const DRIVE_APP_ID = DRIVE_CLIENT_ID.split('-')[0];
 const DRIVE_API_KEY   = 'AIzaSyB5yMNGMQwig5h8FFKSeeDQ-rqJuhp7D98';   // ← clé API Google Cloud (requise par le sélecteur Picker) — voir instructions
-const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive.file';   // accès limité aux fichiers ouverts/créés par l'app (pas de vérification Google requise)
+const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';   // drive.file : créer/sauvegarder ; drive.readonly : lister le contenu du dossier "Cartum"
 const DRIVE_FOLDER    = 'Cartum';
 const DRIVE_FOLDER_ID_KEY = 'cartum_drive_folder_id';   // mémorise le dossier choisi une fois via le Picker
 let _tokenClient      = null; // google.accounts.oauth2.TokenClient
@@ -1657,7 +1657,7 @@ async function driveLoad() {
         driveLog('driveLoad : driveToken absent');
         toast('Non connecté'); return;
     }
-    setDriveStatus('Résolution du dossier…');
+    setDriveStatus('Recherche dans Drive…');
     driveLog(`driveLoad – résolution du dossier "${DRIVE_FOLDER}"…`);
     try {
         // ── Étape 1 : résoudre le dossier Cartum (mémorisé ou choisi via le Picker) ──
@@ -1671,47 +1671,57 @@ async function driveLoad() {
             return;
         }
 
-        // ── Étape 2 : choisir directement les fichiers via le Picker Google ──
-        // IMPORTANT : sous le scope drive.file, sélectionner le DOSSIER seul ne
-        // donne PAS accès à la liste de son contenu existant (c'est documenté et
-        // volontaire côté Google). Chaque fichier doit être choisi individuellement
-        // dans le Picker pour devenir accessible à l'app. On ouvre donc deux Pickers
-        // successifs, filtrés par type, pour retrouver la logique "SVG / CSV séparés".
-        setDriveStatus('Choix du fichier SVG…');
-        driveLog(`  Ouverture du Picker (SVG) dans le dossier id=${folderId}…`);
-        const svgDoc = await pickDriveFileOfType(folderId, 'image/svg+xml', '🗺 Choisissez la carte SVG dans "Cartum"');
-        if (svgDoc) driveLog(`  SVG choisi : ${svgDoc.name} (resourceKey=${svgDoc.resourceKey || 'aucun'})`);
-        else driveLog('  SVG : aucune sélection (annulé)');
+        // ── Étape 2 : lister le contenu du dossier (grâce au scope drive.readonly) ──
+        let allSvgFiles = [], allCsvFiles = [];
+        const listParams = new URLSearchParams({
+            q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
+            fields: 'files(id,name)', pageSize: '100'
+        });
+        const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        if (!listR.ok) {
+            const errText = await listR.text().catch(() => '');
+            throw new Error(`files.list ${listR.status}: ${errText.slice(0, 200) || listR.statusText}`);
+        }
+        const listD = await listR.json();
+        const files = listD.files || [];
+        driveLog(`  Dossier id=${folderId} → ${files.map(f => f.name).join(', ') || 'vide'}`);
 
-        setDriveStatus('Choix du fichier CSV…');
-        driveLog(`  Ouverture du Picker (CSV) dans le dossier id=${folderId}…`);
-        const csvDoc = await pickDriveFileOfType(folderId, 'text/csv,text/plain', '📋 Choisissez la légende CSV dans "Cartum"');
-        if (csvDoc) driveLog(`  CSV choisi : ${csvDoc.name} (resourceKey=${csvDoc.resourceKey || 'aucun'})`);
-        else driveLog('  CSV : aucune sélection (annulé)');
+        files.forEach(f => {
+            const lc = f.name.toLowerCase();
+            if (lc.endsWith('.svg')) allSvgFiles.push(f);
+            if (lc.endsWith('.csv')) allCsvFiles.push(f);
+        });
 
-        if (!svgDoc && !csvDoc) {
-            setDriveStatus('Chargement annulé', '');
+        if (allSvgFiles.length === 0 && allCsvFiles.length === 0) {
+            setDriveStatus(`Aucun .svg/.csv dans "${DRIVE_FOLDER}"`, 'error');
+            toast(`Aucun fichier dans "${DRIVE_FOLDER}"`);
             return;
         }
 
-        // ── Étape 3 : télécharger les fichiers choisis ─────────────
-        if (svgDoc) {
-            driveLog(`  Téléchargement SVG "${svgDoc.name}"…`);
-            const text = await downloadDriveFile(svgDoc.id, svgDoc.resourceKey);
-            svgData = text; driveFileIds.svg = svgDoc.id;
+        // ── Étape 3 : modale interne — choix du SVG et/ou du CSV ────
+        const chosen = await drivePickerModal(allSvgFiles, allCsvFiles);
+        if (!chosen) { setDriveStatus('Chargement annulé', ''); return; }
+
+        // ── Étape 4 : télécharger les fichiers choisis ─────────────
+        if (chosen.svg) {
+            driveLog(`  Téléchargement SVG "${chosen.svg.name}"…`);
+            const text = await downloadDriveFile(chosen.svg.id);
+            svgData = text; driveFileIds.svg = chosen.svg.id;
             renderSvg();
             driveLog(`  ✓ SVG chargé (${text.length} octets)`);
-            toast(`SVG chargé : ${svgDoc.name}`);
+            toast(`SVG chargé : ${chosen.svg.name}`);
         }
-        if (csvDoc) {
-            driveLog(`  Téléchargement CSV "${csvDoc.name}"…`);
-            const text = await downloadDriveFile(csvDoc.id, csvDoc.resourceKey);
-            originalCsvFileName = csvDoc.name; driveFileIds.csv = csvDoc.id;
+        if (chosen.csv) {
+            driveLog(`  Téléchargement CSV "${chosen.csv.name}"…`);
+            const text = await downloadDriveFile(chosen.csv.id);
+            originalCsvFileName = chosen.csv.name; driveFileIds.csv = chosen.csv.id;
             parseCsv(text);
             driveLog(`  ✓ CSV chargé (${text.length} octets)`);
-            toast(`CSV chargé : ${csvDoc.name}`);
+            toast(`CSV chargé : ${chosen.csv.name}`);
         }
-        setDriveStatus(`✓ ${svgDoc ? svgDoc.name : '—'} / ${csvDoc ? csvDoc.name : '—'}`, 'connected');
+        setDriveStatus(`✓ ${chosen.svg ? chosen.svg.name : '—'} / ${chosen.csv ? chosen.csv.name : '—'}`, 'connected');
 
     } catch(e) {
         driveLog(`  ✗ ERREUR : ${e.message}`);
