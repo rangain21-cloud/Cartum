@@ -1671,23 +1671,22 @@ async function driveLoad() {
         // IMPORTANT : sous le scope drive.file, sélectionner le DOSSIER seul ne
         // donne PAS accès à la liste de son contenu existant (c'est documenté et
         // volontaire côté Google). Chaque fichier doit être choisi individuellement
-        // dans le Picker pour devenir accessible à l'app. On ouvre donc le Picker
-        // directement dans ce dossier et on laisse choisir le(s) fichier(s).
-        setDriveStatus('Choisissez le(s) fichier(s)…');
-        driveLog(`  Ouverture du Picker dans le dossier id=${folderId}…`);
-        const picked = await pickDriveFilesInFolder(folderId);
-        if (!picked) { setDriveStatus('Chargement annulé', ''); return; }
-        if (picked.length === 0) {
-            setDriveStatus('Aucun fichier sélectionné', 'error');
-            return;
-        }
-        driveLog(`  Sélection : ${picked.map(f => f.name).join(', ')}`);
+        // dans le Picker pour devenir accessible à l'app. On ouvre donc deux Pickers
+        // successifs, filtrés par type, pour retrouver la logique "SVG / CSV séparés".
+        setDriveStatus('Choix du fichier SVG…');
+        driveLog(`  Ouverture du Picker (SVG) dans le dossier id=${folderId}…`);
+        const svgDoc = await pickDriveFileOfType(folderId, 'image/svg+xml', '🗺 Choisissez la carte SVG dans "Cartum"');
+        if (svgDoc) driveLog(`  SVG choisi : ${svgDoc.name}`);
+        else driveLog('  SVG : aucune sélection (annulé)');
 
-        const svgDoc = picked.find(f => f.name.toLowerCase().endsWith('.svg'));
-        const csvDoc = picked.find(f => f.name.toLowerCase().endsWith('.csv'));
+        setDriveStatus('Choix du fichier CSV…');
+        driveLog(`  Ouverture du Picker (CSV) dans le dossier id=${folderId}…`);
+        const csvDoc = await pickDriveFileOfType(folderId, 'text/csv,text/plain', '📋 Choisissez la légende CSV dans "Cartum"');
+        if (csvDoc) driveLog(`  CSV choisi : ${csvDoc.name}`);
+        else driveLog('  CSV : aucune sélection (annulé)');
+
         if (!svgDoc && !csvDoc) {
-            setDriveStatus('Sélectionnez un fichier .svg et/ou .csv', 'error');
-            toast('Aucun .svg/.csv parmi la sélection');
+            setDriveStatus('Chargement annulé', '');
             return;
         }
 
@@ -2083,11 +2082,12 @@ function pickDriveFolder() {
     });
 }
 
-// ── Sélecteur Google natif (Picker) pour choisir directement les fichiers ──
-// à l'intérieur du dossier Cartum. Sous le scope drive.file, c'est la seule
-// façon d'obtenir l'accès à des fichiers déjà existants (la sélection du
-// dossier seul ne suffit pas) : chaque fichier choisi ici devient accessible.
-function pickDriveFilesInFolder(folderId) {
+// ── Sélecteur Google natif (Picker) pour choisir directement UN fichier ──
+// d'un type donné à l'intérieur du dossier Cartum. Sous le scope drive.file,
+// c'est la seule façon d'obtenir l'accès à un fichier déjà existant (la
+// sélection du dossier seul ne suffit pas) : le fichier choisi ici devient
+// accessible. mimeTypes accepte une liste séparée par des virgules.
+function pickDriveFileOfType(folderId, mimeTypes, title) {
     return new Promise(async (resolve, reject) => {
         if (!DRIVE_API_KEY) {
             toast('DRIVE_API_KEY non configurée — voir instructions');
@@ -2099,16 +2099,16 @@ function pickDriveFilesInFolder(folderId) {
             const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
                 .setParent(folderId)
                 .setIncludeFolders(false)
-                .setSelectFolderEnabled(false);
+                .setSelectFolderEnabled(false)
+                .setMimeTypes(mimeTypes);
             const picker = new google.picker.PickerBuilder()
                 .setOAuthToken(driveToken)
                 .setDeveloperKey(DRIVE_API_KEY)
                 .addView(view)
-                .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
-                .setTitle('Choisissez le(s) fichier(s) SVG et/ou CSV dans "Cartum"')
+                .setTitle(title)
                 .setCallback(data => {
                     if (data.action === google.picker.Action.PICKED) {
-                        resolve(data.docs || []);
+                        resolve(data.docs[0]);
                     } else if (data.action === google.picker.Action.CANCEL) {
                         resolve(null);
                     }
