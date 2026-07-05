@@ -744,6 +744,10 @@ let panStart = null;
 let sortMode = 'id'; // 'id' | 'count'
 let activeFilterProprio = null;
 
+// Compteur "visiteurs" : nombre d'IdProprio distincts recherchés durant CETTE
+// session de travail (volontairement non persisté, remis à zéro au rechargement).
+let sessionSearchedProprios = new Set();
+
 // ── GOOGLE DRIVE – GIS TokenClient (popup sans redirect) ───────────
 let driveToken   = null;      // access_token actif
 let driveFileIds = { svg: null, csv: null, visites: null };
@@ -2344,40 +2348,37 @@ async function popStatsToggle() {
 
 async function popStatsRender() {
     const visits = await popVisitsLoad();
-    // Regroupe par utilisateur, puis par semaine -> nombre de visites (PC + Android confondus)
-    const byUser = {};
+    // Regroupe par semaine, puis par utilisateur -> nombre de visites (PC + Android confondus)
+    const byWeek = {};
     visits.forEach(v => {
         if (!v.user || !v.user.trim()) return;
         const wk   = isoWeekKey(new Date(v.date));
         const user = v.user.toLowerCase().trim();
-        if (!byUser[user]) byUser[user] = {};
-        byUser[user][wk] = (byUser[user][wk] || 0) + 1;
+        if (!byWeek[wk]) byWeek[wk] = {};
+        byWeek[wk][user] = (byWeek[wk][user] || 0) + 1;
     });
-    const users = Object.keys(byUser).sort();
+    const weeks = Object.keys(byWeek).sort().reverse();   // semaine décroissante
     const content = document.getElementById('popStatsContent');
-    if (users.length === 0) { content.innerHTML = '<em>Aucune visite enregistrée.</em>'; return; }
-    content.innerHTML = users.map(user => {
-        const counts      = byUser[user];
-        const weeks       = Object.keys(counts).sort().reverse();
-        const totalVisits = weeks.reduce((sum, wk) => sum + counts[wk], 0);
-        const detail      = weeks.map(wk => `${wk} (${counts[wk]})`).join(', ');
+    if (weeks.length === 0) { content.innerHTML = '<em>Aucune visite enregistrée.</em>'; return; }
+    content.innerHTML = weeks.map(wk => {
+        const counts = byWeek[wk];
+        const users  = Object.keys(counts).sort();
+        const detail = users.map(u => `${u}(${counts[u]})`).join(', ');
         return `<div style="margin-bottom:6px">
-            <span style="color:var(--accent3);font-weight:600">${user}</span>
-            <span style="color:var(--text-muted)"> — ${totalVisits} visite${totalVisits > 1 ? 's' : ''}, ${weeks.length} semaine${weeks.length > 1 ? 's' : ''} : </span>
+            <span style="color:var(--accent3);font-weight:600">${wk}</span>
+            <span style="color:var(--text-muted)"> : </span>
             <span style="color:#ddd">${detail}</span>
         </div>`;
     }).join('');
 }
 
-// ── Incrémente Visite pour le IdProprio courant, en repartant de la dernière
-//    valeur connue sur Drive : évite qu'un appareil écrase l'incrément de l'autre.
-async function popIncrementVisite() {
-    if (!csvData || !currentIdLot) return false;
-    const row = csvData.find(r => String(r.IdLot) === String(currentIdLot));
-    if (!row || !row.IdProprio) return false;
-    const idProprio = row.IdProprio;
+// ── Incrémente Visite +1 pour TOUS les IdLot du IdProprio donné (contexte du
+//    pavé "Filtrer par propriétaire"), en repartant de la dernière valeur
+//    connue sur Drive : évite qu'un appareil écrase l'incrément de l'autre.
+async function popIncrementVisite(idProprio) {
+    if (!csvData || !idProprio) return false;
 
-    // Valeur locale actuelle
+    // Valeur locale actuelle pour ce propriétaire
     let baseValue = 0;
     csvData.forEach(r => { if (r.IdProprio === idProprio) baseValue = Math.max(baseValue, parseInt(r.Visite) || 0); });
 
@@ -2396,6 +2397,7 @@ async function popIncrementVisite() {
     }
 
     const newValue = baseValue + 1;
+    // +1 pour TOUS les lots (IdLot) de ce propriétaire, pas seulement le lot courant
     csvData.forEach(r => { if (r.IdProprio === idProprio) r.Visite = newValue; });
 
     // Sauvegarder sur Drive si connecté
@@ -2432,14 +2434,8 @@ async function popStatsRefresh() {
     }
     document.getElementById('popStatProprio').textContent = proprioTotal;
 
-    // Cette semaine = utilisateurs Geneanet distincts (non vides), partagé PC/Android via Drive
-    const visits = await popVisitsLoad();
-    const thisWeek = isoWeekKey(new Date());
-    const weekUsers = [...new Set(
-        visits.filter(v => isoWeekKey(new Date(v.date)) === thisWeek && v.user && v.user.trim())
-              .map(v => v.user.toLowerCase().trim())
-    )];
-    document.getElementById('popStatWeek').textContent = weekUsers.length;
+    // "visiteurs" = nombre d'IdProprio distincts recherchés durant CETTE session de travail
+    document.getElementById('popStatWeek').textContent = sessionSearchedProprios.size;
 }
 
 async function openPopulation() {
@@ -2451,11 +2447,17 @@ async function openPopulation() {
     // navigateur mobile bloque la popup (elle doit rester liée au clic direct).
     window.open(url, '_blank', 'noopener');
 
-    // Enregistrer la visite dans l'historique partagé (Drive + repli local hors-ligne)
+    // +1 dans Visite pour TOUS les IdLot du propriétaire actif dans le pavé
+    // "Filtrer par propriétaire" (rien ne se passe si aucun propriétaire filtré)
+    const idProprio = activeFilterProprio;
+    if (idProprio) {
+        sessionSearchedProprios.add(idProprio);   // compteur "visiteurs" = session de travail
+        await popIncrementVisite(idProprio);
+    }
+
+    // Enregistrer la visite dans l'historique Geneanet partagé (Drive + repli local hors-ligne)
     if (user) await popRecordVisit(user);
 
-    // Incrémenter Visite (compteur commun PC/Android) et rafraîchir l'affichage
-    await popIncrementVisite();
     await popStatsRefresh();
 }
 
