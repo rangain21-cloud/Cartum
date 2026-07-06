@@ -438,6 +438,104 @@
             font-size: 0.75rem; color: var(--text-muted);
             padding: 0 8px;
         }
+
+        /* ══ AIDE (overlay intégré, ex-Aide.html) ═══════════════════
+           Scopé sous #aideOverlay pour ne jamais interférer avec le
+           reste de l'app. Polices système uniquement (pas de Google
+           Fonts) pour garantir un fonctionnement 100% hors-ligne. */
+        #aideOverlay{
+            display:none;
+            position:fixed; inset:0; z-index:9999;
+            overflow-y:auto;
+            scroll-behavior:smooth;
+            background:#eef1ea;
+            color:#10202f;
+            font-family:'Segoe UI', Roboto, Arial, sans-serif;
+            line-height:1.6;
+            --ink:        #10202f;
+            --ink-soft:   #24384a;
+            --paper:      #eef1ea;
+            --paper-dim:  #dde2d6;
+            --aide-line:  #b9c2b3;
+            --brass:      #a9822f;
+            --brass-soft: #cfa74f;
+        }
+        #aideOverlay *{ box-sizing:border-box; }
+        #aideOverlay .aide-close{
+            position:sticky; top:0; z-index:2;
+            display:flex; justify-content:flex-end;
+            padding:0.8rem 1.2rem 0;
+            background:transparent;
+        }
+        #aideOverlay .aide-close button{
+            font-family:inherit; font-size:0.85rem; font-weight:600;
+            background:var(--ink); color:var(--paper);
+            border:none; border-radius:6px; padding:0.5rem 1rem;
+            cursor:pointer;
+        }
+        #aideOverlay .hero{
+            position:relative;
+            background:var(--ink); color:var(--paper);
+            padding:2.5rem 1.5rem 3rem;
+            overflow:hidden;
+            margin-top:-2.6rem;
+        }
+        #aideOverlay .hero::before{
+            content:""; position:absolute; inset:0;
+            background-image:
+                repeating-radial-gradient(circle at 82% 18%, transparent 0 34px, rgba(238,241,234,0.05) 34px 36px, transparent 36px 70px),
+                repeating-radial-gradient(circle at 82% 18%, transparent 0 74px, rgba(238,241,234,0.04) 74px 76px, transparent 76px 130px);
+            pointer-events:none;
+        }
+        #aideOverlay .hero-inner{ position:relative; max-width:840px; margin:0 auto; }
+        #aideOverlay .eyebrow{
+            font-family:'Consolas', 'Courier New', monospace;
+            font-size:0.75rem; letter-spacing:0.14em; text-transform:uppercase;
+            color:var(--brass-soft); margin:0 0 1rem;
+        }
+        #aideOverlay .eyebrow::before{ content:"— "; }
+        #aideOverlay h1{
+            font-weight:600;
+            font-size:clamp(1.9rem, 6vw, 2.9rem);
+            line-height:1.08; margin:0 0 1.1rem; letter-spacing:-0.01em;
+        }
+        #aideOverlay .hero p{ max-width:56ch; color:#c9d2d8; font-size:1.02rem; margin:0; }
+        #aideOverlay .wrap{ max-width:840px; margin:0 auto; padding:0 1.5rem; }
+        #aideOverlay nav.legend{
+            display:flex; gap:1.5rem; flex-wrap:wrap;
+            max-width:840px; margin:0 auto; padding:1rem 1.5rem;
+            font-family:'Consolas', 'Courier New', monospace;
+            font-size:0.8rem; letter-spacing:0.03em;
+            border-bottom:1px solid var(--aide-line);
+            background:var(--paper-dim);
+        }
+        #aideOverlay nav.legend a{ color:var(--ink-soft); text-decoration:none; border-bottom:1px solid transparent; padding-bottom:2px; }
+        #aideOverlay nav.legend a:hover, #aideOverlay nav.legend a:focus-visible{ color:var(--brass); border-bottom-color:var(--brass); }
+        #aideOverlay section{ padding:2.6rem 0; border-bottom:1px solid var(--aide-line); }
+        #aideOverlay section:last-of-type{ border-bottom:none; }
+        #aideOverlay .section-tag{ font-family:'Consolas','Courier New',monospace; font-size:0.75rem; color:var(--brass); letter-spacing:0.08em; margin:0 0 0.6rem; }
+        #aideOverlay h2{ font-weight:600; font-size:1.5rem; margin:0 0 1.2rem; color:var(--ink); }
+        #aideOverlay h3{ font-weight:600; font-size:1.02rem; margin:1.6rem 0 0.5rem; color:var(--ink); }
+        #aideOverlay p{ margin:0 0 1rem; color:var(--ink-soft); max-width:66ch; }
+        #aideOverlay ul{ margin:0 0 1rem; padding-left:1.2rem; color:var(--ink-soft); max-width:64ch; }
+        #aideOverlay li{ margin-bottom:0.45rem; }
+        #aideOverlay code, #aideOverlay .tag{
+            font-family:'Consolas','Courier New',monospace; font-size:0.85em;
+            background:var(--paper-dim); border:1px solid var(--aide-line);
+            border-radius:3px; padding:0.1em 0.4em; color:var(--ink);
+        }
+        #aideOverlay .scope-box{
+            border:1px solid var(--aide-line); background:#f6f7f2;
+            border-left:3px solid var(--brass); padding:1rem 1.2rem; margin:1.2rem 0;
+        }
+        #aideOverlay .scope-box p{ margin:0; }
+        #aideOverlay .scope-box p + p{ margin-top:0.6rem; }
+        #aideOverlay a{ color:var(--brass); }
+        #aideOverlay a:hover{ color:var(--ink); }
+        #aideOverlay footer{
+            padding:2rem 1.5rem 3rem; text-align:center;
+            font-family:'Consolas','Courier New',monospace; font-size:0.78rem; color:var(--ink-soft);
+        }
     </style>
 </head>
 <body>
@@ -460,7 +558,7 @@
     <div id="sidebarResizeHandle"></div>
 
     <div id="sidebarHead">
-        <div style="flex:1;overflow:hidden">
+        <div onclick="openAideOverlay()" title="Aide, confidentialité et conditions d'utilisation" style="flex:1;overflow:hidden;cursor:pointer">
             <div class="logo">Cartum</div>
             <span class="sub">Carte interactive</span>
         </div>
@@ -738,6 +836,91 @@
     </div>
 </div>
 
+<!-- ══ AIDE (overlay intégré, ex-Aide.html) ═══════════════════════ -->
+<div id="aideOverlay">
+    <div class="aide-close"><button onclick="closeAideOverlay()">✕ Fermer</button></div>
+
+    <div class="hero">
+        <div class="hero-inner">
+            <p class="eyebrow">Cartum</p>
+            <h1>Carte interactive, dessinée à partir de vos propres données.</h1>
+            <p>Cartum lit et affiche des fichiers <code>.svg</code> et <code>.csv</code> stockés sur votre Google Drive personnel, dans un dossier nommé « Cartum ». Aucune donnée ne transite par un serveur tiers : tout se passe entre votre navigateur et votre compte Google.</p>
+        </div>
+    </div>
+
+    <nav class="legend" aria-label="Sommaire">
+        <a href="#accueil">Accueil</a>
+        <a href="#confidentialite">Confidentialité</a>
+        <a href="#cgu">Conditions d'utilisation</a>
+        <a href="#contact">Contact</a>
+    </nav>
+
+    <div class="wrap">
+
+        <section id="accueil">
+            <p class="section-tag">§ 1 — À propos</p>
+            <h2>Qu'est-ce que Cartum ?</h2>
+            <p>Cartum est une application web personnelle qui affiche une carte interactive à partir de fichiers que vous fournissez vous-même : des tracés au format <code>.svg</code> et des données associées au format <code>.csv</code>.</p>
+            <p>L'application se connecte à votre Google Drive uniquement pour retrouver ces fichiers dans un dossier appelé <code>Cartum</code>, et éventuellement y enregistrer des mises à jour que vous effectuez depuis l'interface. Elle ne publie rien, ne partage rien, et ne communique avec aucun autre service que Google Drive.</p>
+        </section>
+
+        <section id="confidentialite">
+            <p class="section-tag">§ 2 — Politique de confidentialité</p>
+            <h2>Confidentialité et données personnelles</h2>
+
+            <h3>Ce à quoi Cartum accède</h3>
+            <p>Lorsque vous cliquez sur « Connecter » à Google Drive, Cartum demande une autorisation OAuth pour lire et, selon vos actions, modifier des fichiers dans votre Drive. Concrètement, l'application :</p>
+            <ul>
+                <li>recherche un dossier nommé <code>Cartum</code> et les fichiers <code>.svg</code> / <code>.csv</code> qu'il contient ;</li>
+                <li>peut rechercher par nom d'autres fichiers <code>.svg</code> / <code>.csv</code> présents ailleurs sur votre Drive, si vous utilisez la fonction de recherche de l'application ;</li>
+                <li>enregistre les modifications que vous faites dans l'application vers ces mêmes fichiers, si vous déclenchez une sauvegarde.</li>
+            </ul>
+
+            <div class="scope-box">
+                <p><strong>Portée technique (scope OAuth) :</strong> <code>https://www.googleapis.com/auth/drive</code>.</p>
+                <p>Ce niveau d'accès est plus large que le strict nécessaire pour le dossier <code>Cartum</code> seul, car la fonction de recherche par nom de fichier a besoin de parcourir votre Drive au-delà des fichiers créés par l'application. Cartum n'utilise cet accès que pour lire ou écrire des fichiers <code>.svg</code>/<code>.csv</code> à votre demande explicite — il ne parcourt, ne copie ni ne transmet aucun autre contenu.</p>
+            </div>
+
+            <h3>Où vont vos données</h3>
+            <p>Cartum s'exécute entièrement dans votre navigateur. Les fichiers lus depuis Drive restent en mémoire locale le temps de la session ; aucune donnée n'est envoyée à un serveur d'Cartum, pour la simple raison qu'un tel serveur n'existe pas. L'unique interlocuteur réseau de l'application, en dehors de Google, est votre propre navigateur.</p>
+
+            <h3>Ce que Cartum ne fait pas</h3>
+            <ul>
+                <li>Pas de collecte d'informations personnelles au-delà de ce qui est strictement nécessaire à l'affichage de vos fichiers Drive.</li>
+                <li>Pas de vente, partage ou transfert de données à des tiers.</li>
+                <li>Pas de suivi publicitaire, pas de cookies de traçage, pas d'analytique tierce.</li>
+            </ul>
+
+            <h3>Révoquer l'accès</h3>
+            <p>Vous pouvez retirer à tout moment l'autorisation accordée à Cartum depuis la page <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Accès aux applications tierces</a> de votre compte Google, ou via le bouton de déconnexion dans l'application.</p>
+        </section>
+
+        <section id="cgu">
+            <p class="section-tag">§ 3 — Conditions d'utilisation</p>
+            <h2>Conditions d'utilisation</h2>
+            <p>Cartum est un projet personnel, fourni « en l'état », sans garantie d'aucune sorte, y compris de disponibilité, d'exactitude des données affichées ou d'absence d'erreurs.</p>
+            <ul>
+                <li>Vous êtes seul responsable des fichiers que vous importez, affichez ou modifiez via l'application.</li>
+                <li>L'usage de Cartum est prévu à titre personnel et non commercial.</li>
+                <li>L'accès à l'application peut être interrompu ou modifié sans préavis.</li>
+                <li>En cas de perte ou de corruption de données sur votre Drive suite à une action effectuée dans l'application, aucune responsabilité ne pourra être retenue au-delà de ce que permet la loi applicable.</li>
+            </ul>
+            <p>L'utilisation de Cartum implique l'acceptation de ces conditions ainsi que celles des <a href="https://policies.google.com/terms" target="_blank" rel="noopener">conditions d'utilisation de Google</a> pour tout ce qui concerne votre compte Google et Google Drive.</p>
+        </section>
+
+        <section id="contact">
+            <p class="section-tag">§ 4 — Contact</p>
+            <h2>Une question, un signalement ?</h2>
+            <p>Le code source de Cartum est public. Pour toute question sur cette politique, un bug ou une demande liée à vos données, ouvrez une <a href="https://github.com/rangain21-cloud/Cartum/issues" target="_blank" rel="noopener">issue sur le dépôt GitHub</a>.</p>
+        </section>
+
+    </div>
+
+    <footer>
+        Cartum — Dernière mise à jour&nbsp;: juillet 2026
+    </footer>
+</div>
+
 <!-- ══ TOAST ════════════════════════════════════════ -->
 <div id="toast"></div>
 
@@ -840,6 +1023,15 @@ function expandSec(id) {
     const s = document.getElementById(id);
     if (s && !s.classList.contains('expanded')) s.classList.add('expanded');
     if (id === 'sec-population') popStatsRefresh();   // affiche Total/Proprio à l'ouverture, avec les valeurs déjà stockées dans le csv
+}
+
+// ── Aide (overlay intégré, ex-Aide.html) ────────────────────────────
+function openAideOverlay() {
+    document.getElementById('aideOverlay').style.display = 'block';
+    document.getElementById('aideOverlay').scrollTop = 0;
+}
+function closeAideOverlay() {
+    document.getElementById('aideOverlay').style.display = 'none';
 }
 
 // ── DRAWER (kept for back-compat refs) ─────────────
