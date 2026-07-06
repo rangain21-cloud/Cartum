@@ -839,6 +839,7 @@ function toggleSidebar() {
 function expandSec(id) {
     const s = document.getElementById(id);
     if (s && !s.classList.contains('expanded')) s.classList.add('expanded');
+    if (id === 'sec-population') popStatsRefresh();   // affiche Total/Proprio à l'ouverture, avec les valeurs déjà stockées dans le csv
 }
 
 // ── DRAWER (kept for back-compat refs) ─────────────
@@ -847,6 +848,9 @@ function closeDrawer()  { /* no-op in split layout */ }
 
 function toggleSection(id) {
     document.getElementById(id).classList.toggle('expanded');
+    if (id === 'sec-population' && document.getElementById(id).classList.contains('expanded')) {
+        popStatsRefresh();   // affiche Total/Proprio à l'ouverture, avec les valeurs déjà stockées dans le csv
+    }
 }
 
 // ── TOUCH / PAN / ZOOM ─────────────────────────────
@@ -1047,6 +1051,7 @@ function parseCsv(text) {
             loadCommentsFromCsv();
             if (currentSvg) { mapElements(); populateProprioFilter(); }
             setLocalStatus(`Légende : ${csvData.length} lignes`, 'ok');
+            popStatsRefresh();   // affiche Total/Proprio dès le chargement, sans attendre un clic sur un lot
         }
     });
 }
@@ -2568,7 +2573,9 @@ async function openPopulation() {
     }
 
     // Enregistrer la visite dans l'historique Geneanet partagé (Drive + repli local hors-ligne)
-    if (user) await popRecordVisit(user);
+    // On utilise "base" (= "pract" par défaut si le champ est vide), pas "user",
+    // pour que l'historique soit bien alimenté même sans saisie explicite.
+    await popRecordVisit(base);
 
     await popStatsRefresh();
 }
