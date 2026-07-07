@@ -439,17 +439,25 @@
             padding: 0 8px;
         }
 
-        /* ══ AIDE (overlay intégré, ex-Aide.html) ═══════════════════
-           Scopé sous #aideOverlay pour ne jamais interférer avec le
+        /* ══ AIDE (fenêtre flottante intégrée, ex-Aide.html) ═════════
+           Scopé sous #aideWindowBody pour ne jamais interférer avec le
            reste de l'app. Polices système uniquement (pas de Google
            Fonts) pour garantir un fonctionnement 100% hors-ligne. */
         #aideOverlay{
             display:none;
             position:fixed; inset:0; z-index:9999;
-            overflow-y:auto;
-            scroll-behavior:smooth;
-            background:#eef1ea;
-            color:#10202f;
+            background:rgba(0,0,0,0.55);
+        }
+        #aideWindow{
+            position:fixed;
+            width:65vw; height:65vh;
+            min-width:300px; min-height:260px;
+            max-width:98vw; max-height:98vh;
+            background:#eef1ea; color:#10202f;
+            border-radius:10px; overflow:hidden;
+            box-shadow:0 20px 60px rgba(0,0,0,0.55);
+            display:flex; flex-direction:column;
+            resize:both;   /* poignée native de redimensionnement (coin bas-droit) */
             font-family:'Segoe UI', Roboto, Arial, sans-serif;
             line-height:1.6;
             --ink:        #10202f;
@@ -460,48 +468,55 @@
             --brass:      #a9822f;
             --brass-soft: #cfa74f;
         }
-        #aideOverlay *{ box-sizing:border-box; }
-        #aideOverlay .aide-close{
-            position:sticky; top:0; z-index:2;
-            display:flex; justify-content:flex-end;
-            padding:0.8rem 1.2rem 0;
-            background:transparent;
-        }
-        #aideOverlay .aide-close button{
-            font-family:inherit; font-size:0.85rem; font-weight:600;
+        #aideWindow *{ box-sizing:border-box; }
+        #aideWindowHeader{
+            flex:0 0 auto;
+            display:flex; align-items:center; justify-content:space-between;
+            padding:0.65rem 0.5rem 0.65rem 1rem;
             background:var(--ink); color:var(--paper);
-            border:none; border-radius:6px; padding:0.5rem 1rem;
-            cursor:pointer;
+            cursor:move; user-select:none; -webkit-user-select:none;
+            font-weight:600; font-size:0.9rem;
+            touch-action:none;
         }
-        #aideOverlay .hero{
+        #aideWindowHeader button{
+            font-family:inherit; font-size:0.85rem; font-weight:600;
+            background:transparent; color:var(--paper);
+            border:1px solid rgba(238,241,234,0.4);
+            border-radius:6px; padding:0.3rem 0.7rem; cursor:pointer;
+        }
+        #aideWindowBody{
+            flex:1 1 auto;
+            overflow-y:auto;
+            scroll-behavior:smooth;
+        }
+        #aideWindowBody .hero{
             position:relative;
             background:var(--ink); color:var(--paper);
-            padding:2.5rem 1.5rem 3rem;
+            padding:2.2rem 1.5rem 2.6rem;
             overflow:hidden;
-            margin-top:-2.6rem;
         }
-        #aideOverlay .hero::before{
+        #aideWindowBody .hero::before{
             content:""; position:absolute; inset:0;
             background-image:
                 repeating-radial-gradient(circle at 82% 18%, transparent 0 34px, rgba(238,241,234,0.05) 34px 36px, transparent 36px 70px),
                 repeating-radial-gradient(circle at 82% 18%, transparent 0 74px, rgba(238,241,234,0.04) 74px 76px, transparent 76px 130px);
             pointer-events:none;
         }
-        #aideOverlay .hero-inner{ position:relative; max-width:840px; margin:0 auto; }
-        #aideOverlay .eyebrow{
+        #aideWindowBody .hero-inner{ position:relative; max-width:840px; margin:0 auto; }
+        #aideWindowBody .eyebrow{
             font-family:'Consolas', 'Courier New', monospace;
             font-size:0.75rem; letter-spacing:0.14em; text-transform:uppercase;
             color:var(--brass-soft); margin:0 0 1rem;
         }
-        #aideOverlay .eyebrow::before{ content:"— "; }
-        #aideOverlay h1{
+        #aideWindowBody .eyebrow::before{ content:"— "; }
+        #aideWindowBody h1{
             font-weight:600;
-            font-size:clamp(1.9rem, 6vw, 2.9rem);
+            font-size:clamp(1.5rem, 4vw, 2.4rem);
             line-height:1.08; margin:0 0 1.1rem; letter-spacing:-0.01em;
         }
-        #aideOverlay .hero p{ max-width:56ch; color:#c9d2d8; font-size:1.02rem; margin:0; }
-        #aideOverlay .wrap{ max-width:840px; margin:0 auto; padding:0 1.5rem; }
-        #aideOverlay nav.legend{
+        #aideWindowBody .hero p{ max-width:56ch; color:#c9d2d8; font-size:1rem; margin:0; }
+        #aideWindowBody .wrap{ max-width:840px; margin:0 auto; padding:0 1.5rem; }
+        #aideWindowBody nav.legend{
             display:flex; gap:1.5rem; flex-wrap:wrap;
             max-width:840px; margin:0 auto; padding:1rem 1.5rem;
             font-family:'Consolas', 'Courier New', monospace;
@@ -509,30 +524,30 @@
             border-bottom:1px solid var(--aide-line);
             background:var(--paper-dim);
         }
-        #aideOverlay nav.legend a{ color:var(--ink-soft); text-decoration:none; border-bottom:1px solid transparent; padding-bottom:2px; }
-        #aideOverlay nav.legend a:hover, #aideOverlay nav.legend a:focus-visible{ color:var(--brass); border-bottom-color:var(--brass); }
-        #aideOverlay section{ padding:2.6rem 0; border-bottom:1px solid var(--aide-line); }
-        #aideOverlay section:last-of-type{ border-bottom:none; }
-        #aideOverlay .section-tag{ font-family:'Consolas','Courier New',monospace; font-size:0.75rem; color:var(--brass); letter-spacing:0.08em; margin:0 0 0.6rem; }
-        #aideOverlay h2{ font-weight:600; font-size:1.5rem; margin:0 0 1.2rem; color:var(--ink); }
-        #aideOverlay h3{ font-weight:600; font-size:1.02rem; margin:1.6rem 0 0.5rem; color:var(--ink); }
-        #aideOverlay p{ margin:0 0 1rem; color:var(--ink-soft); max-width:66ch; }
-        #aideOverlay ul{ margin:0 0 1rem; padding-left:1.2rem; color:var(--ink-soft); max-width:64ch; }
-        #aideOverlay li{ margin-bottom:0.45rem; }
-        #aideOverlay code, #aideOverlay .tag{
+        #aideWindowBody nav.legend a{ color:var(--ink-soft); text-decoration:none; border-bottom:1px solid transparent; padding-bottom:2px; }
+        #aideWindowBody nav.legend a:hover, #aideWindowBody nav.legend a:focus-visible{ color:var(--brass); border-bottom-color:var(--brass); }
+        #aideWindowBody section{ padding:2rem 0; border-bottom:1px solid var(--aide-line); }
+        #aideWindowBody section:last-of-type{ border-bottom:none; }
+        #aideWindowBody .section-tag{ font-family:'Consolas','Courier New',monospace; font-size:0.75rem; color:var(--brass); letter-spacing:0.08em; margin:0 0 0.6rem; }
+        #aideWindowBody h2{ font-weight:600; font-size:1.35rem; margin:0 0 1.2rem; color:var(--ink); }
+        #aideWindowBody h3{ font-weight:600; font-size:1rem; margin:1.6rem 0 0.5rem; color:var(--ink); }
+        #aideWindowBody p{ margin:0 0 1rem; color:var(--ink-soft); max-width:66ch; }
+        #aideWindowBody ul{ margin:0 0 1rem; padding-left:1.2rem; color:var(--ink-soft); max-width:64ch; }
+        #aideWindowBody li{ margin-bottom:0.45rem; }
+        #aideWindowBody code, #aideWindowBody .tag{
             font-family:'Consolas','Courier New',monospace; font-size:0.85em;
             background:var(--paper-dim); border:1px solid var(--aide-line);
             border-radius:3px; padding:0.1em 0.4em; color:var(--ink);
         }
-        #aideOverlay .scope-box{
+        #aideWindowBody .scope-box{
             border:1px solid var(--aide-line); background:#f6f7f2;
             border-left:3px solid var(--brass); padding:1rem 1.2rem; margin:1.2rem 0;
         }
-        #aideOverlay .scope-box p{ margin:0; }
-        #aideOverlay .scope-box p + p{ margin-top:0.6rem; }
-        #aideOverlay a{ color:var(--brass); }
-        #aideOverlay a:hover{ color:var(--ink); }
-        #aideOverlay footer{
+        #aideWindowBody .scope-box p{ margin:0; }
+        #aideWindowBody .scope-box p + p{ margin-top:0.6rem; }
+        #aideWindowBody a{ color:var(--brass); }
+        #aideWindowBody a:hover{ color:var(--ink); }
+        #aideWindowBody footer{
             padding:2rem 1.5rem 3rem; text-align:center;
             font-family:'Consolas','Courier New',monospace; font-size:0.78rem; color:var(--ink-soft);
         }
@@ -836,9 +851,14 @@
     </div>
 </div>
 
-<!-- ══ AIDE (overlay intégré, ex-Aide.html) ═══════════════════════ -->
+<!-- ══ AIDE (fenêtre flottante intégrée, ex-Aide.html) ═════════════ -->
 <div id="aideOverlay">
-    <div class="aide-close"><button onclick="closeAideOverlay()">✕ Fermer</button></div>
+  <div id="aideWindow">
+    <div id="aideWindowHeader">
+        <span>ℹ️ Aide — Cartum</span>
+        <button onclick="closeAideOverlay()">✕ Fermer</button>
+    </div>
+    <div id="aideWindowBody">
 
     <div class="hero">
         <div class="hero-inner">
@@ -919,6 +939,9 @@
     <footer>
         Cartum — Dernière mise à jour&nbsp;: juillet 2026
     </footer>
+
+    </div>
+  </div>
 </div>
 
 <!-- ══ TOAST ════════════════════════════════════════ -->
@@ -1025,14 +1048,62 @@ function expandSec(id) {
     if (id === 'sec-population') popStatsRefresh();   // affiche Total/Proprio à l'ouverture, avec les valeurs déjà stockées dans le csv
 }
 
-// ── Aide (overlay intégré, ex-Aide.html) ────────────────────────────
+// ── Aide (fenêtre flottante intégrée, ex-Aide.html) ─────────────────
 function openAideOverlay() {
-    document.getElementById('aideOverlay').style.display = 'block';
-    document.getElementById('aideOverlay').scrollTop = 0;
+    const overlay = document.getElementById('aideOverlay');
+    const win     = document.getElementById('aideWindow');
+    overlay.style.display = 'block';
+    // Taille/position par défaut à 65% de l'écran, centrée (seulement si
+    // la fenêtre n'a jamais été déplacée/redimensionnée manuellement)
+    if (!win.dataset.userAdjusted) {
+        win.style.width  = '65vw';
+        win.style.height = '65vh';
+        win.style.left   = '17.5vw';
+        win.style.top    = '17.5vh';
+    }
+    document.getElementById('aideWindowBody').scrollTop = 0;
 }
 function closeAideOverlay() {
     document.getElementById('aideOverlay').style.display = 'none';
 }
+
+// Glisser-déposer depuis l'en-tête (souris + tactile via Pointer Events)
+(function initAideWindowDrag() {
+    const win    = document.getElementById('aideWindow');
+    const header = document.getElementById('aideWindowHeader');
+    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+    header.addEventListener('pointerdown', e => {
+        if (e.target.closest('button')) return;   // ne pas démarrer le glisser sur le bouton Fermer
+        dragging = true;
+        win.dataset.userAdjusted = '1';            // la position par défaut ne s'appliquera plus
+        startX = e.clientX; startY = e.clientY;
+        const rect = win.getBoundingClientRect();
+        startLeft = rect.left; startTop = rect.top;
+        win.style.left = startLeft + 'px';
+        win.style.top  = startTop + 'px';
+        header.setPointerCapture(e.pointerId);
+    });
+    header.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        let newLeft = startLeft + dx, newTop = startTop + dy;
+        // Garde toujours une partie de la fenêtre visible/accessible
+        newLeft = Math.max(-win.offsetWidth + 80, Math.min(newLeft, window.innerWidth - 80));
+        newTop  = Math.max(0, Math.min(newTop, window.innerHeight - 40));
+        win.style.left = newLeft + 'px';
+        win.style.top  = newTop + 'px';
+    });
+    header.addEventListener('pointerup',     () => dragging = false);
+    header.addEventListener('pointercancel', () => dragging = false);
+
+    // Marquer comme "ajustée" aussi si l'utilisateur redimensionne via la
+    // poignée native (coin bas-droit) — pour ne pas écraser sa taille au réouverture
+    // (on ignore le déclenchement initial du ResizeObserver, qui a lieu même overlay fermé)
+    const overlay = document.getElementById('aideOverlay');
+    new ResizeObserver(() => { if (overlay.style.display === 'block') win.dataset.userAdjusted = '1'; })
+        .observe(win);
+})();
 
 // ── DRAWER (kept for back-compat refs) ─────────────
 function toggleDrawer() { toggleSidebar(); }
