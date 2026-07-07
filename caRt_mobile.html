@@ -986,7 +986,7 @@ const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.goog
 // mais l'autorisation sur le fichier n'est jamais enregistrée → 404 au téléchargement).
 const DRIVE_APP_ID = DRIVE_CLIENT_ID.split('-')[0];
 const DRIVE_API_KEY   = 'AIzaSyB5yMNGMQwig5h8FFKSeeDQ-rqJuhp7D98';   // ← clé API Google Cloud (requise par le sélecteur Picker) — voir instructions
-const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly';   // drive.file : créer/sauvegarder ; drive.readonly : lister le contenu du dossier "Cartum"
+const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive';   // lecture ET écriture sur les fichiers .svg/.csv choisis via la modale interne (drive.file seul ne suffit pas ici, cf. Aide.html § Confidentialité)
 const DRIVE_FOLDER    = 'Cartum';
 const DRIVE_FOLDER_ID_KEY = 'cartum_drive_folder_id';   // mémorise le dossier choisi une fois via le Picker
 let _tokenClient      = null; // google.accounts.oauth2.TokenClient
