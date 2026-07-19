@@ -1685,23 +1685,21 @@ function populateProprioFilter() {
     const sel = document.getElementById('idProprioFilter');
     sel.innerHTML = '<option value="">— Tous les propriétaires —</option>';
     if (!csvData) return;
+    // Le compteur doit refléter TOUS les IdLot du CSV pour chaque IdProprio,
+    // pas seulement ceux ayant un élément SVG correspondant sur la carte.
+    // On utilise un Set d'IdLot par propriétaire pour éviter de compter deux
+    // fois un même IdLot si le CSV contient des lignes en double.
     const stats = {};
-    (allSvgElements.length > 0 ? allSvgElements : []).forEach(el => {
-        const r = el._csvData;
+    csvData.forEach(r => {
         if (r && r.IdProprio) {
-            if (!stats[r.IdProprio]) stats[r.IdProprio] = { count: 0, famille: r.Famille || '' };
-            stats[r.IdProprio].count++;
+            if (!stats[r.IdProprio]) stats[r.IdProprio] = { lots: new Set(), famille: r.Famille || '' };
+            if (r.IdLot !== undefined && r.IdLot !== null && r.IdLot !== '') {
+                stats[r.IdProprio].lots.add(String(r.IdLot));
+            }
+            if (!stats[r.IdProprio].famille && r.Famille) stats[r.IdProprio].famille = r.Famille;
         }
     });
-    if (Object.keys(stats).length === 0) {
-        csvData.forEach(r => {
-            if (r.IdProprio) {
-                if (!stats[r.IdProprio]) stats[r.IdProprio] = { count: 0, famille: r.Famille || '' };
-                stats[r.IdProprio].count++;
-            }
-        });
-    }
-    let arr = Object.entries(stats).map(([id, v]) => ({ id, ...v }));
+    let arr = Object.entries(stats).map(([id, v]) => ({ id, famille: v.famille, count: v.lots.size }));
     if (sortMode === 'count') arr.sort((a, b) => b.count - a.count);
     else arr.sort((a, b) => (parseInt(a.id) || 0) - (parseInt(b.id) || 0));
     arr.forEach(p => {
