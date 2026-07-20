@@ -245,24 +245,33 @@
             font-size: 0.85rem; margin-bottom: 6px;
             appearance: none;
         }
-        /* ── Select multiple (plusieurs propriétaires à la fois) ── */
-        select.styled-select[multiple] {
-            appearance: auto;
-            min-height: 150px;
+        /* ── Checklist multiple (plusieurs propriétaires à la fois, tapable) ── */
+        #proprioChecklist {
+            max-height: 220px; overflow-y: auto;
+            display: flex; flex-direction: column; gap: 3px;
+            margin-bottom: 6px; padding: 6px;
+            background: var(--bg-panel); border: 1px solid var(--border);
+            border-radius: 8px;
+            -webkit-overflow-scrolling: touch;
         }
-        select.styled-select[multiple] option {
-            padding: 5px 6px; border-radius: 4px;
+        #proprioChecklist::-webkit-scrollbar { width: 3px; }
+        #proprioChecklist::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+        .pc-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 7px 8px; border-radius: 6px; cursor: pointer;
+            font-size: 0.82rem; color: var(--text);
+            user-select: none;
         }
-        select.styled-select[multiple] option:checked {
-            font-weight: 700;
-        }
+        .pc-item:active { background: var(--bg-dark); }
+        .pc-item.checked { background: rgba(255,255,255,0.08); font-weight: 700; }
+        .pc-item input[type="checkbox"] { pointer-events: none; flex-shrink: 0; width: 16px; height: 16px; }
         .ms-hint {
             font-size: 0.7rem; color: var(--text-muted);
             margin: -2px 0 6px; line-height: 1.3;
         }
         .ms-swatch {
             display: inline-block; width: 9px; height: 9px;
-            border-radius: 50%; margin-right: 6px; flex-shrink: 0;
+            border-radius: 50%; margin-right: 2px; flex-shrink: 0;
         }
 
         /* ── LISTE LOTS DU PROPRIÉTAIRE ────────── */
@@ -655,8 +664,7 @@
                     <div class="sort-opt active" id="sortById" onclick="setSortMode('id')"># Id</div>
                     <div class="sort-opt" id="sortByCount" onclick="setSortMode('count')">📦 Nb lots</div>
                 </div>
-                <select id="idProprioFilter" class="styled-select" multiple size="6" onchange="applyProprioFilter()">
-                </select>
+                <div id="proprioChecklist"></div>
                 <div class="ms-hint">Touchez un ou plusieurs propriétaires (touchez à nouveau pour désélectionner).</div>
 
                 <!-- Liste des lots des propriétaires sélectionnés -->
@@ -993,9 +1001,9 @@ let panStart = null;
 let sortMode = 'id'; // 'id' | 'count'
 let activeFilterProprios = new Set();
 
-// Compteur "visiteurs" : nombre d'IdProprio distincts recherchés durant CETTE
-// session de travail (volontairement non persisté, remis à zéro au rechargement).
-let sessionSearchedProprios = new Set();
+// Compteur "visiteurs" : nombre de clics sur "Rechercher dans l'arbre" durant
+// CETTE session de travail (volontairement non persisté, remis à zéro au rechargement).
+let sessionVisitCount = 0;
 
 // ── GOOGLE DRIVE – GIS TokenClient (popup sans redirect) ───────────
 let driveToken   = null;      // access_token actif
@@ -1708,9 +1716,8 @@ function setSortMode(m) {
 }
 
 function populateProprioFilter() {
-    const sel = document.getElementById('idProprioFilter');
-    const previouslySelected = new Set(activeFilterProprios);
-    sel.innerHTML = '';
+    const container = document.getElementById('proprioChecklist');
+    container.innerHTML = '';
     if (!csvData) return;
     // Le compteur doit refléter TOUS les IdLot du CSV pour chaque IdProprio,
     // pas seulement ceux ayant un élément SVG correspondant sur la carte.
@@ -1730,25 +1737,47 @@ function populateProprioFilter() {
     if (sortMode === 'count') arr.sort((a, b) => b.count - a.count);
     else arr.sort((a, b) => (parseInt(a.id) || 0) - (parseInt(b.id) || 0));
     arr.forEach(p => {
-        const o = document.createElement('option');
-        o.value = p.id;
-        o.textContent = `● ${p.id}${p.famille ? ' ' + p.famille : ''} — ${p.count} lot${p.count > 1 ? 's' : ''}`;
-        o.style.color = proprioColor(p.id).fill;
-        if (previouslySelected.has(p.id)) o.selected = true;
-        sel.appendChild(o);
+        const isChecked = activeFilterProprios.has(p.id);
+        const c = proprioColor(p.id);
+        const item = document.createElement('div');
+        item.className = 'pc-item' + (isChecked ? ' checked' : '');
+        item.dataset.id = p.id;
+        item.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''}>
+            <span class="ms-swatch" style="background:${c.fill}"></span>
+            <span>${escHtml(p.id)}${p.famille ? ' ' + escHtml(p.famille) : ''} — ${p.count} lot${p.count > 1 ? 's' : ''}</span>`;
+        item.addEventListener('click', () => toggleProprioSelection(p.id));
+        container.appendChild(item);
     });
 }
 
+// Bascule un propriétaire dans/hors la sélection active et ré-applique le filtre
+function toggleProprioSelection(id) {
+    if (activeFilterProprios.has(id)) activeFilterProprios.delete(id);
+    else activeFilterProprios.add(id);
+    document.querySelectorAll('#proprioChecklist .pc-item').forEach(el => {
+        const checked = activeFilterProprios.has(el.dataset.id);
+        el.classList.toggle('checked', checked);
+        const cb = el.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = checked;
+    });
+    applyProprioFilter();
+}
+
 function selectAllProprios() {
-    const sel = document.getElementById('idProprioFilter');
-    Array.from(sel.options).forEach(o => { o.selected = true; });
+    if (!csvData) return;
+    const allIds = new Set();
+    csvData.forEach(r => { if (r && r.IdProprio) allIds.add(r.IdProprio); });
+    activeFilterProprios = allIds;
+    document.querySelectorAll('#proprioChecklist .pc-item').forEach(el => {
+        el.classList.add('checked');
+        const cb = el.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = true;
+    });
     applyProprioFilter();
 }
 
 function applyProprioFilter() {
-    const sel = document.getElementById('idProprioFilter');
-    const ids = Array.from(sel.selectedOptions).map(o => o.value).filter(Boolean);
-    activeFilterProprios = new Set(ids);
+    const ids = Array.from(activeFilterProprios);
     clearAllHighlights();
 
     // Rien de sélectionné : liste masquée, aucun surlignage
@@ -1827,9 +1856,12 @@ function renderProprioLots(idProprioList) {
 
 function resetFilter() {
     clearAllHighlights();
-    const sel = document.getElementById('idProprioFilter');
-    Array.from(sel.options).forEach(o => { o.selected = false; });
     activeFilterProprios = new Set();
+    document.querySelectorAll('#proprioChecklist .pc-item').forEach(el => {
+        el.classList.remove('checked');
+        const cb = el.querySelector('input[type="checkbox"]');
+        if (cb) cb.checked = false;
+    });
     renderProprioLots([]);
     document.getElementById('lotSearch').value = '';
     document.getElementById('searchStatus').textContent = '';
@@ -2790,70 +2822,17 @@ async function popStatsRender() {
     }).join('');
 }
 
-// ── Incrémente Visite +1 pour TOUS les IdLot du IdProprio donné (contexte du
-//    pavé "Filtrer par propriétaire"), en repartant de la dernière valeur
-//    connue sur Drive : évite qu'un appareil écrase l'incrément de l'autre.
-async function popIncrementVisite(idProprio) {
-    if (!csvData || !idProprio) return false;
-
-    // Valeur locale actuelle pour ce propriétaire
-    let baseValue = 0;
-    csvData.forEach(r => { if (r.IdProprio === idProprio) baseValue = Math.max(baseValue, parseInt(r.Visite) || 0); });
-
-    // Recharger la valeur la plus fraîche depuis Drive avant d'incrémenter
-    // (au cas où l'autre appareil aurait incrémenté depuis le dernier chargement local)
-    if (driveToken && driveFileIds.csv) {
-        try {
-            const freshText = await downloadDriveFile(driveFileIds.csv);
-            const freshRows = await new Promise(resolve => {
-                Papa.parse(freshText, { header: true, skipEmptyLines: true, complete: r => resolve(r.data) });
-            });
-            freshRows.forEach(r => { if (r.IdProprio === idProprio) baseValue = Math.max(baseValue, parseInt(r.Visite) || 0); });
-        } catch (e) {
-            driveLog('popIncrementVisite : lecture fraîche impossible (' + e.message + '), valeur locale utilisée');
-        }
-    }
-
-    const newValue = baseValue + 1;
-    // +1 pour TOUS les lots (IdLot) de ce propriétaire, pas seulement le lot courant
-    csvData.forEach(r => { if (r.IdProprio === idProprio) r.Visite = newValue; });
-
-    // Sauvegarder sur Drive si connecté
-    if (driveToken && driveFileIds.csv) {
-        await driveSave();
-    }
-    return true;
-}
-
-// ── Affiche dans Total la valeur Visite du CSV pour le IdProprio courant
+// ── Affiche dans "Ce fichier" / "Cette session" le nombre de clics sur
+//    "Rechercher dans l'arbre", indépendamment de tout propriétaire filtré
 async function popStatsRefresh() {
-    // Total = valeur Visite du CSV pour le lot courant (compteur commun PC/Android)
-    let total = '—';
-    if (csvData && currentIdLot) {
-        const row = csvData.find(r => String(r.IdLot) === String(currentIdLot));
-        if (row && row.IdProprio) {
-            const ref = csvData.find(r => r.IdProprio === row.IdProprio && r.Visite !== undefined);
-            if (ref) total = ref.Visite || 0;
-        }
-    }
-    document.getElementById('popStatTotal').textContent = total;
+    // "Ce fichier" = nombre total de clics enregistrés sur "Rechercher dans l'arbre",
+    // tous appareils confondus (compte les entrées de visites.json, partagé via Drive).
+    const visits = await popVisitsLoad();
+    document.getElementById('popStatProprio').textContent = visits.length;
 
-    // Proprio = somme des Visite pour chaque IdProprio distinct (une seule fois par
-    // propriétaire, même s'il possède plusieurs lots) → total global toutes visites confondues
-    let proprioTotal = 0;
-    if (csvData) {
-        const seen = new Set();
-        csvData.forEach(r => {
-            if (r.IdProprio && !seen.has(r.IdProprio)) {
-                seen.add(r.IdProprio);
-                proprioTotal += parseInt(r.Visite) || 0;
-            }
-        });
-    }
-    document.getElementById('popStatProprio').textContent = proprioTotal;
-
-    // "visiteurs" = nombre d'IdProprio distincts recherchés durant CETTE session de travail
-    document.getElementById('popStatWeek').textContent = sessionSearchedProprios.size;
+    // "Cette session" = nombre de clics effectués depuis l'ouverture de l'application
+    // sur cet appareil (compteur local, remis à zéro au rechargement).
+    document.getElementById('popStatWeek').textContent = sessionVisitCount;
 }
 
 async function openPopulation() {
@@ -2865,13 +2844,9 @@ async function openPopulation() {
     // navigateur mobile bloque la popup (elle doit rester liée au clic direct).
     window.open(url, '_blank', 'noopener');
 
-    // +1 dans Visite pour TOUS les IdLot de chaque propriétaire actif dans le pavé
-    // "Filtrer par propriétaire" (rien ne se passe si aucun propriétaire filtré)
-    const ids = Array.from(activeFilterProprios);
-    for (const idProprio of ids) {
-        sessionSearchedProprios.add(idProprio);   // compteur "visiteurs" = session de travail
-        await popIncrementVisite(idProprio);
-    }
+    // Compteur simple : +1 à chaque clic sur le bouton, quel que soit le nombre
+    // de propriétaires sélectionnés dans le pavé "Filtrer par propriétaire" (0, 1 ou plusieurs)
+    sessionVisitCount++;
 
     // Enregistrer la visite dans l'historique Geneanet partagé (Drive + repli local hors-ligne)
     // On utilise "base" (= "pract" par défaut si le champ est vide), pas "user",
