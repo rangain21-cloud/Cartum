@@ -245,6 +245,25 @@
             font-size: 0.85rem; margin-bottom: 6px;
             appearance: none;
         }
+        /* ── Select multiple (plusieurs propriétaires à la fois) ── */
+        select.styled-select[multiple] {
+            appearance: auto;
+            min-height: 150px;
+        }
+        select.styled-select[multiple] option {
+            padding: 5px 6px; border-radius: 4px;
+        }
+        select.styled-select[multiple] option:checked {
+            font-weight: 700;
+        }
+        .ms-hint {
+            font-size: 0.7rem; color: var(--text-muted);
+            margin: -2px 0 6px; line-height: 1.3;
+        }
+        .ms-swatch {
+            display: inline-block; width: 9px; height: 9px;
+            border-radius: 50%; margin-right: 6px; flex-shrink: 0;
+        }
 
         /* ── LISTE LOTS DU PROPRIÉTAIRE ────────── */
         #proprioLots {
@@ -636,11 +655,11 @@
                     <div class="sort-opt active" id="sortById" onclick="setSortMode('id')"># Id</div>
                     <div class="sort-opt" id="sortByCount" onclick="setSortMode('count')">📦 Nb lots</div>
                 </div>
-                <select id="idProprioFilter" class="styled-select" onchange="applyProprioFilter()">
-                    <option value="">— Tous les propriétaires —</option>
+                <select id="idProprioFilter" class="styled-select" multiple size="6" onchange="applyProprioFilter()">
                 </select>
+                <div class="ms-hint">Touchez un ou plusieurs propriétaires (touchez à nouveau pour désélectionner).</div>
 
-                <!-- Liste des lots du proprio sélectionné -->
+                <!-- Liste des lots des propriétaires sélectionnés -->
                 <div id="proprioLots"></div>
 
                 <div class="search-row">
@@ -651,6 +670,7 @@
                 </div>
                 <div id="searchStatus" class="status-msg"></div>
                 <div class="btn-row" style="margin-top:8px">
+                    <button class="btn btn-muted btn-sm" onclick="selectAllProprios()">☑ Tout sélectionner</button>
                     <button class="btn btn-danger btn-sm" onclick="resetFilter()">↺ Réinitialiser</button>
                 </div>
             </div>
@@ -971,7 +991,7 @@ let panStart = null;
 
 // filter state
 let sortMode = 'id'; // 'id' | 'count'
-let activeFilterProprio = null;
+let activeFilterProprios = new Set();
 
 // Compteur "visiteurs" : nombre d'IdProprio distincts recherchés durant CETTE
 // session de travail (volontairement non persisté, remis à zéro au rechargement).
@@ -1389,6 +1409,16 @@ function hlClear(el) {
     el.style.cursor = '';
 }
 
+// Couleur déterministe par IdProprio (même propriétaire = toujours la même couleur,
+// quel que soit le nombre ou l'ordre des propriétaires sélectionnés)
+function proprioColor(idProprio) {
+    const s = String(idProprio);
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
+    const hue = hash % 360;
+    return { fill: `hsl(${hue}, 70%, 55%)`, stroke: `hsl(${hue}, 70%, 32%)` };
+}
+
 // ── LOT CLICK ───────────────────────────────────────
 function handleLotClick(e) {
     e.stopPropagation();
@@ -1417,12 +1447,8 @@ function selectLot(idLot, clickedEl) {
     openInfoSection();
     popStatsRefresh();
     const _d = csvData ? csvData.find(r => String(r.IdLot) === String(idLot)) : null;
-    if (_d && _d.IdProprio) {
-        if (activeFilterProprio === _d.IdProprio) {
-            renderProprioLots(_d.IdProprio);
-        } else if (activeFilterProprio) {
-            renderProprioLots(activeFilterProprio);
-        }
+    if (_d && _d.IdProprio && activeFilterProprios.size) {
+        renderProprioLots(Array.from(activeFilterProprios));
     }
 }
 
@@ -1472,7 +1498,7 @@ function selectLotFromList(idLot) {
     showLotInfo(idLot);
     updateHeader(idLot);
     // Refresh selected state in list
-    if (activeFilterProprio) renderProprioLots(activeFilterProprio);
+    if (activeFilterProprios.size) renderProprioLots(Array.from(activeFilterProprios));
 }
 
 function row(label, val) {
@@ -1683,7 +1709,8 @@ function setSortMode(m) {
 
 function populateProprioFilter() {
     const sel = document.getElementById('idProprioFilter');
-    sel.innerHTML = '<option value="">— Tous les propriétaires —</option>';
+    const previouslySelected = new Set(activeFilterProprios);
+    sel.innerHTML = '';
     if (!csvData) return;
     // Le compteur doit refléter TOUS les IdLot du CSV pour chaque IdProprio,
     // pas seulement ceux ayant un élément SVG correspondant sur la carte.
@@ -1705,81 +1732,93 @@ function populateProprioFilter() {
     arr.forEach(p => {
         const o = document.createElement('option');
         o.value = p.id;
-        o.textContent = `${p.id}${p.famille ? ' ' + p.famille : ''} — ${p.count} lot${p.count > 1 ? 's' : ''}`;
+        o.textContent = `● ${p.id}${p.famille ? ' ' + p.famille : ''} — ${p.count} lot${p.count > 1 ? 's' : ''}`;
+        o.style.color = proprioColor(p.id).fill;
+        if (previouslySelected.has(p.id)) o.selected = true;
         sel.appendChild(o);
     });
 }
 
+function selectAllProprios() {
+    const sel = document.getElementById('idProprioFilter');
+    Array.from(sel.options).forEach(o => { o.selected = true; });
+    applyProprioFilter();
+}
+
 function applyProprioFilter() {
-    const id = document.getElementById('idProprioFilter').value;
-    activeFilterProprio = id || null;
+    const sel = document.getElementById('idProprioFilter');
+    const ids = Array.from(sel.selectedOptions).map(o => o.value).filter(Boolean);
+    activeFilterProprios = new Set(ids);
     clearAllHighlights();
 
-    // Hide lot list if no owner selected
-    if (!id) {
-        renderProprioLots(null);
+    // Rien de sélectionné : liste masquée, aucun surlignage
+    if (!ids.length) {
+        renderProprioLots([]);
         return;
     }
 
-    // Highlight owner's lots on map (les autres lots restent inchangés)
+    // Surligner sur la carte tous les IdLot de chaque IdProprio sélectionné,
+    // avec une couleur différente par propriétaire (les autres lots restent inchangés)
     allSvgElements.forEach(el => {
         const r = el._csvData;
-        if (r && r.IdProprio === id) {
-            hlSet(el, '#9b59b6', '#8e44ad', '2px');
+        if (r && activeFilterProprios.has(r.IdProprio)) {
+            const c = proprioColor(r.IdProprio);
+            hlSet(el, c.fill, c.stroke, '2px');
         }
     });
 
     // Build and show lot list below select
-    renderProprioLots(id);
+    renderProprioLots(ids);
     expandSec('sec-filter');
 }
 
-function renderProprioLots(idProprio) {
+function renderProprioLots(idProprioList) {
     const container = document.getElementById('proprioLots');
-    if (!idProprio || !csvData) {
+    const ids = Array.isArray(idProprioList) ? idProprioList.filter(Boolean) : (idProprioList ? [idProprioList] : []);
+    if (!ids.length || !csvData) {
         container.innerHTML = '';
         container.classList.remove('visible');
         return;
     }
-    const lots = csvData.filter(r => r.IdProprio === idProprio);
-    if (!lots.length) { container.classList.remove('visible'); return; }
 
-    // Un lot est-il actif parmi ceux de ce proprio ?
-    const hasActiveLot = currentIdLot && lots.some(r => String(r.IdLot) === String(currentIdLot));
+    // Un lot est-il actif parmi ceux des propriétaires sélectionnés ?
+    const allLots = csvData.filter(r => r && ids.includes(r.IdProprio));
+    if (!allLots.length) { container.innerHTML = ''; container.classList.remove('visible'); return; }
+    const hasActiveLot = currentIdLot && allLots.some(r => String(r.IdLot) === String(currentIdLot));
 
-    // Header : si un lot est sélectionné, rappel discret du proprio
-    let header;
-    if (hasActiveLot) {
-        header = `<div style="font-size:0.72rem;color:var(--text-muted);padding:2px 2px 4px;font-weight:600;opacity:0.6">
-            Propriétaire ${idProprio} — ${lots.length} lot${lots.length>1?'s':''} (cliquer pour changer)
+    let html = '';
+    ids.forEach(idProprio => {
+        const lots = csvData.filter(r => r.IdProprio === idProprio);
+        if (!lots.length) return;
+        const c = proprioColor(idProprio);
+
+        // En-tête par propriétaire, avec sa pastille de couleur (celle utilisée sur la carte)
+        html += `<div style="font-size:0.75rem;color:var(--text-muted);padding:6px 2px 4px;font-weight:600;display:flex;align-items:center">
+            <span class="ms-swatch" style="background:${c.fill}"></span>
+            Propriétaire ${escHtml(idProprio)} — ${lots.length} lot${lots.length > 1 ? 's' : ''}
         </div>`;
-    } else {
-        header = `<div style="font-size:0.75rem;color:var(--text-muted);padding:4px 2px 4px;font-weight:600">
-            ${lots.length} lot${lots.length>1?'s':''} — cliquer pour sélectionner
-        </div>`;
-    }
 
-    let html = header;
-    lots.forEach(r => {
-        const isSelected = String(r.IdLot) === String(currentIdLot);
-        // Atténuer si un autre lot est actif
-        const isDimmed   = hasActiveLot && !isSelected;
-        const hasText    = r.Texte && r.Texte.trim() && r.Texte.trim() !== 'undefined';
-        const hasCmt     = !!commentsData[r.IdLot];
-        const lieuCadrage = [r['Lieu-dit'], r.Cadrage].filter(Boolean).join(' · ');
+        lots.forEach(r => {
+            const isSelected = String(r.IdLot) === String(currentIdLot);
+            // Atténuer si un autre lot (de n'importe quel propriétaire affiché) est actif
+            const isDimmed   = hasActiveLot && !isSelected;
+            const hasText    = r.Texte && r.Texte.trim() && r.Texte.trim() !== 'undefined';
+            const hasCmt     = !!commentsData[r.IdLot];
+            const lieuCadrage = [r['Lieu-dit'], r.Cadrage].filter(Boolean).join(' · ');
 
-        let cls = 'pl-item';
-        if (isSelected) cls += ' selected';
-        if (isDimmed)   cls += ' dimmed';
+            let cls = 'pl-item';
+            if (isSelected) cls += ' selected';
+            if (isDimmed)   cls += ' dimmed';
 
-        html += `<div class="${cls}" onclick="selectLotFromList('${r.IdLot}')">
-            <div class="pl-item-top">
-                <span class="pl-id">Lot ${r.IdLot}</span>
-                ${hasText || hasCmt ? '<span class="pl-badge">💬</span>' : ''}
-            </div>`;
-        if (!isDimmed && lieuCadrage) html += `<div class="pl-sub">${escHtml(lieuCadrage)}</div>`;
-        if (!isDimmed && hasText)     html += `<div class="pl-text">${escHtml(r.Texte.substring(0,90))}${r.Texte.length>90?'…':''}</div>`;
-        html += `</div>`;
+            html += `<div class="${cls}" style="border-left:3px solid ${c.fill}" onclick="selectLotFromList('${r.IdLot}')">
+                <div class="pl-item-top">
+                    <span class="pl-id">Lot ${r.IdLot}</span>
+                    ${hasText || hasCmt ? '<span class="pl-badge">💬</span>' : ''}
+                </div>`;
+            if (!isDimmed && lieuCadrage) html += `<div class="pl-sub">${escHtml(lieuCadrage)}</div>`;
+            if (!isDimmed && hasText)     html += `<div class="pl-text">${escHtml(r.Texte.substring(0,90))}${r.Texte.length>90?'…':''}</div>`;
+            html += `</div>`;
+        });
     });
 
     container.innerHTML = html;
@@ -1788,9 +1827,10 @@ function renderProprioLots(idProprio) {
 
 function resetFilter() {
     clearAllHighlights();
-    document.getElementById('idProprioFilter').value = '';
-    activeFilterProprio = null;
-    renderProprioLots(null);
+    const sel = document.getElementById('idProprioFilter');
+    Array.from(sel.options).forEach(o => { o.selected = false; });
+    activeFilterProprios = new Set();
+    renderProprioLots([]);
     document.getElementById('lotSearch').value = '';
     document.getElementById('searchStatus').textContent = '';
     document.getElementById('lotInfoBody').innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem">Appuyez sur un lot pour voir ses détails.</p>';
@@ -2825,10 +2865,10 @@ async function openPopulation() {
     // navigateur mobile bloque la popup (elle doit rester liée au clic direct).
     window.open(url, '_blank', 'noopener');
 
-    // +1 dans Visite pour TOUS les IdLot du propriétaire actif dans le pavé
+    // +1 dans Visite pour TOUS les IdLot de chaque propriétaire actif dans le pavé
     // "Filtrer par propriétaire" (rien ne se passe si aucun propriétaire filtré)
-    const idProprio = activeFilterProprio;
-    if (idProprio) {
+    const ids = Array.from(activeFilterProprios);
+    for (const idProprio of ids) {
         sessionSearchedProprios.add(idProprio);   // compteur "visiteurs" = session de travail
         await popIncrementVisite(idProprio);
     }
