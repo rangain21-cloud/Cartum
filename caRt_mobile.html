@@ -643,7 +643,7 @@
                     <button class="btn btn-muted btn-sm btn-full" onclick="openCsvSourcePicker()">📋 Légende CSV</button>
                 </div>
                 <div style="margin-top:6px">
-                    <button class="btn btn-muted btn-sm btn-full" onclick="document.getElementById('localImgFolderInput').click()">🖼 Dossier Images</button>
+                    <button class="btn btn-muted btn-sm btn-full" onclick="openImgSourcePicker()">🖼 Dossier Images</button>
                 </div>
                 <input type="file" id="localSvgInput" accept=".svg" onchange="loadLocalSvg(this)">
                 <input type="file" id="localCsvInput" accept=".csv,.txt,text/csv,text/plain,text/comma-separated-values" onchange="loadLocalCsv(this)" style="display:none">
@@ -823,6 +823,37 @@
         </div>
         <div class="modal-btns">
             <button class="btn btn-muted" onclick="closeCsvSourceModal()">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE SOURCE IMAGES ═══════════════════════════ -->
+<div class="modal" id="imgSourceModal">
+    <div class="modal-box">
+        <div class="modal-title">🖼 Charger les images</div>
+        <div class="modal-body">Choisissez la source du dossier :</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+            <button class="btn btn-primary" style="width:100%;text-align:left;padding:12px 16px" onclick="closeImgSourceModal();document.getElementById('localImgFolderInput').click()">
+                📂 Dossier local (appareil, USB…)
+            </button>
+            <button class="btn btn-muted" id="imgSourceDriveBtn" style="width:100%;text-align:left;padding:12px 16px" onclick="closeImgSourceModal();loadImagesFromDrive()">
+                ☁️ Google Drive — sous-dossier <strong id="imgSourceFolderName"></strong>
+            </button>
+        </div>
+        <div class="modal-btns">
+            <button class="btn btn-muted" onclick="closeImgSourceModal()">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE CHOIX SOUS-DOSSIER IMAGES ═══════════════ -->
+<div class="modal" id="imgFolderPickerModal">
+    <div class="modal-box">
+        <div class="modal-title">🖼 Choisir le sous-dossier Images</div>
+        <div class="modal-body">Plusieurs sous-dossiers ont été trouvés dans <strong id="imgFolderPickerParent"></strong>, choisissez celui qui contient vos images :</div>
+        <div id="imgFolderPickerList" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;margin-bottom:16px"></div>
+        <div class="modal-btns">
+            <button class="btn btn-muted" onclick="document.getElementById('imgFolderPickerModal').classList.remove('open');document.getElementById('imgFolderPickerModal')._reject&&document.getElementById('imgFolderPickerModal')._reject()">Annuler</button>
         </div>
     </div>
 </div>
@@ -1017,6 +1048,8 @@ const DRIVE_API_KEY   = 'AIzaSyB5yMNGMQwig5h8FFKSeeDQ-rqJuhp7D98';   // ← clé
 const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive';   // lecture ET écriture sur les fichiers .svg/.csv choisis via la modale interne (drive.file seul ne suffit pas ici, cf. Aide.html § Confidentialité)
 const DRIVE_FOLDER    = 'Cartum';
 const DRIVE_FOLDER_ID_KEY = 'cartum_drive_folder_id';   // mémorise le dossier choisi une fois via le Picker
+const DRIVE_IMAGES_FOLDER_ID_KEY = 'cartum_drive_images_folder_id';   // mémorise le sous-dossier Images une fois résolu
+let _cachedImagesFolderId = null;
 let _tokenClient      = null; // google.accounts.oauth2.TokenClient
 let _gapiReady        = false;
 
@@ -2286,6 +2319,199 @@ function closeCsvSourceModal() {
     document.getElementById('csvSourceModal').classList.remove('open');
 }
 
+// ── Choix de la source Images ──────────────────────────────────────
+function openImgSourcePicker() {
+    const modal = document.getElementById('imgSourceModal');
+    const driveBtn = document.getElementById('imgSourceDriveBtn');
+    const folderName = document.getElementById('imgSourceFolderName');
+    folderName.textContent = 'Images';
+    driveBtn.disabled = !driveToken;
+    driveBtn.style.opacity = driveToken ? '1' : '0.4';
+    driveBtn.title = driveToken ? '' : 'Connectez-vous à Drive d\'abord';
+    modal.classList.add('open');
+}
+function closeImgSourceModal() {
+    document.getElementById('imgSourceModal').classList.remove('open');
+}
+
+// ── Modale de choix du sous-dossier Images (si ambigu) ───────────────
+function pickImgFolderModal(folders) {
+    return new Promise((resolve) => {
+        const modal  = document.getElementById('imgFolderPickerModal');
+        const list   = document.getElementById('imgFolderPickerList');
+        const parent = document.getElementById('imgFolderPickerParent');
+
+        parent.textContent = DRIVE_FOLDER;
+        list.innerHTML = '';
+
+        folders.forEach(f => {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-muted';
+            btn.style.cssText = 'width:100%;text-align:left;padding:10px 14px;font-size:0.9rem;border-radius:10px;';
+            btn.textContent = '📁 ' + f.name;
+            btn.onclick = () => {
+                modal.classList.remove('open');
+                resolve(f);
+            };
+            list.appendChild(btn);
+        });
+
+        modal._reject = () => resolve(null);
+        modal.classList.add('open');
+    });
+}
+
+// ── Résout l'id du sous-dossier "Images" à l'intérieur de Cartum ─────
+// Recherché directement via l'API Drive (scope complet, pas de sélecteur
+// natif du système), donc jamais affecté par le dernier dossier "visité"
+// dans une boîte de dialogue de fichiers.
+async function resolveImagesFolderId(cartumFolderId) {
+    // Id déjà mémorisé et toujours valide ?
+    const savedId = localStorage.getItem(DRIVE_IMAGES_FOLDER_ID_KEY);
+    if (savedId) {
+        try {
+            const r = await fetch(`https://www.googleapis.com/drive/v3/files/${savedId}?fields=id,name,trashed,parents`, {
+                headers: { Authorization: 'Bearer ' + driveToken }
+            });
+            if (r.ok) {
+                const d = await r.json();
+                if (!d.trashed && (d.parents || []).includes(cartumFolderId)) {
+                    _cachedImagesFolderId = d.id;
+                    return d.id;
+                }
+            }
+        } catch (e) { /* on retente une résolution complète ci-dessous */ }
+    }
+
+    // Lister les sous-dossiers de Cartum
+    const listP = new URLSearchParams({
+        q: `'${cartumFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id,name)', pageSize: '50'
+    });
+    const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listP}`, {
+        headers: { Authorization: 'Bearer ' + driveToken }
+    });
+    if (!listR.ok) {
+        const errText = await listR.text().catch(() => '');
+        throw new Error(`files.list ${listR.status}: ${errText.slice(0, 200) || listR.statusText}`);
+    }
+    const { files: subfolders = [] } = await listR.json();
+
+    if (subfolders.length === 0) {
+        throw new Error(`Aucun sous-dossier trouvé dans "${DRIVE_FOLDER}"`);
+    }
+
+    // Un seul sous-dossier nommé "images" (insensible à la casse) → on le prend directement
+    const exact = subfolders.filter(f => f.name.toLowerCase() === 'images');
+    let chosen;
+    if (exact.length === 1) {
+        chosen = exact[0];
+    } else if (subfolders.length === 1) {
+        chosen = subfolders[0];
+    } else {
+        // Ambigu → on laisse l'utilisateur choisir une fois pour toutes
+        chosen = await pickImgFolderModal(exact.length ? exact : subfolders);
+        if (!chosen) throw new Error('Sous-dossier Images non choisi');
+    }
+
+    localStorage.setItem(DRIVE_IMAGES_FOLDER_ID_KEY, chosen.id);
+    _cachedImagesFolderId = chosen.id;
+    return chosen.id;
+}
+
+// ── Télécharge un fichier Drive binaire (image) sous forme de Blob ───
+async function downloadDriveFileBlob(fileId, resourceKey) {
+    const headers = { Authorization: 'Bearer ' + driveToken };
+    if (resourceKey) headers['X-Goog-Drive-Resource-Keys'] = `${fileId}/${resourceKey}`;
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers });
+    if (!r.ok) {
+        const errText = await r.text().catch(() => '');
+        throw new Error(`downloadDriveFileBlob ${r.status}: ${errText.slice(0, 200) || r.statusText}`);
+    }
+    return r.blob();
+}
+
+// ── Charge toutes les images depuis Drive : Cartum/Images ────────────
+// Passe entièrement par l'API Drive (jamais par le sélecteur natif du
+// système), donc n'est jamais perturbé par le dernier dossier "visité"
+// lors du chargement du SVG ou du CSV.
+async function loadImagesFromDrive() {
+    if (!driveToken) {
+        document.getElementById('localImgFolderInput').click();
+        return;
+    }
+    try {
+        setLocalStatus('Recherche des images sur Drive…', '');
+
+        let cartumFolderId;
+        try {
+            cartumFolderId = await getOrCreateFolder(DRIVE_FOLDER);
+        } catch (e) {
+            toast(`Dossier "${DRIVE_FOLDER}" non sélectionné`);
+            setLocalStatus('', '');
+            return;
+        }
+
+        let imagesFolderId;
+        try {
+            imagesFolderId = await resolveImagesFolderId(cartumFolderId);
+        } catch (e) {
+            toast('Images : ' + e.message);
+            setLocalStatus('Sous-dossier Images introuvable', 'error');
+            return;
+        }
+
+        const listP = new URLSearchParams({
+            q: `'${imagesFolderId}' in parents and mimeType contains 'image/' and trashed = false`,
+            fields: 'files(id,name,mimeType)', pageSize: '1000'
+        });
+        const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listP}`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        if (!listR.ok) {
+            const errText = await listR.text().catch(() => '');
+            throw new Error(`files.list ${listR.status}: ${errText.slice(0, 200) || listR.statusText}`);
+        }
+        const { files = [] } = await listR.json();
+
+        if (files.length === 0) {
+            setLocalStatus('Aucune image trouvée dans le dossier Images', 'error');
+            toast('Aucune image trouvée sur Drive');
+            return;
+        }
+
+        // Vider le cache existant (mêmes règles que pour le dossier local)
+        Object.values(localImgCache).forEach(url => URL.revokeObjectURL(url));
+        Object.keys(localImgCache).forEach(k => delete localImgCache[k]);
+
+        let count = 0;
+        for (const f of files) {
+            try {
+                const blob = await downloadDriveFileBlob(f.id);
+                const url = URL.createObjectURL(blob);
+                const name = f.name;
+                const noExt = name.replace(/\.[^.]+$/, '');
+                localImgCache[name.toLowerCase()]             = url;
+                localImgCache[noExt.toLowerCase()]            = url;
+                localImgCache[`images/${name}`.toLowerCase()]  = url;
+                localImgCache[`images/${noExt}`.toLowerCase()] = url;
+                count++;
+            } catch (e) {
+                driveLog(`  ✗ image "${f.name}" : ${e.message}`);
+            }
+        }
+
+        setLocalStatus(`🖼 ${count} image(s) chargée(s) depuis Drive`, 'ok');
+        toast(`${count} image(s) chargée(s) depuis Drive`);
+        if (typeof renderSvg === 'function' && svgData) renderSvg();
+
+    } catch (e) {
+        console.error('loadImagesFromDrive error:', e);
+        toast('Erreur Drive Images : ' + e.message);
+        setLocalStatus('Erreur Drive', 'error');
+    }
+}
+
 // ── Modale de sélection CSV ────────────────────────────────────────
 function pickCsvModal(files) {
     return new Promise((resolve, reject) => {
@@ -2510,7 +2736,9 @@ function pickDriveFileOfType(folderId, mimeTypes, title) {
 // la dernière sélection (nécessaire sous le scope drive.file).
 function driveChangeFolder() {
     localStorage.removeItem(DRIVE_FOLDER_ID_KEY);
+    localStorage.removeItem(DRIVE_IMAGES_FOLDER_ID_KEY);
     _cachedFolderId = null;
+    _cachedImagesFolderId = null;
     driveFileIds = { svg: null, csv: null, visites: null };
     toast('Choisissez à nouveau votre dossier Cartum');
     driveLoad();
