@@ -2376,14 +2376,17 @@ async function resolveImagesFolderId(cartumFolderId) {
             if (r.ok) {
                 const d = await r.json();
                 if (!d.trashed && (d.parents || []).includes(cartumFolderId)) {
+                    driveLog(`  resolveImagesFolderId : id mémorisé valide → ${d.id} (${d.name})`);
                     _cachedImagesFolderId = d.id;
                     return d.id;
                 }
+                driveLog(`  resolveImagesFolderId : id mémorisé invalide ou hors de "${DRIVE_FOLDER}" → nouvelle recherche`);
             }
         } catch (e) { /* on retente une résolution complète ci-dessous */ }
     }
 
     // Lister les sous-dossiers de Cartum
+    driveLog('  resolveImagesFolderId : recherche du sous-dossier "Images"…');
     const listP = new URLSearchParams({
         q: `'${cartumFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
         fields: 'files(id,name)', pageSize: '50'
@@ -2396,6 +2399,7 @@ async function resolveImagesFolderId(cartumFolderId) {
         throw new Error(`files.list ${listR.status}: ${errText.slice(0, 200) || listR.statusText}`);
     }
     const { files: subfolders = [] } = await listR.json();
+    driveLog(`  resolveImagesFolderId : sous-dossiers trouvés → ${subfolders.map(f => f.name).join(', ') || 'aucun'}`);
 
     if (subfolders.length === 0) {
         throw new Error(`Aucun sous-dossier trouvé dans "${DRIVE_FOLDER}"`);
@@ -2416,6 +2420,7 @@ async function resolveImagesFolderId(cartumFolderId) {
 
     localStorage.setItem(DRIVE_IMAGES_FOLDER_ID_KEY, chosen.id);
     _cachedImagesFolderId = chosen.id;
+    driveLog(`  resolveImagesFolderId : dossier retenu → ${chosen.id} (${chosen.name})`);
     return chosen.id;
 }
 
@@ -2442,6 +2447,8 @@ async function loadImagesFromDrive() {
     }
     try {
         setLocalStatus('Recherche des images sur Drive…', '');
+        toast('Recherche des images sur Drive…');
+        driveLog('loadImagesFromDrive : démarrage…');
 
         let cartumFolderId;
         try {
@@ -2449,6 +2456,7 @@ async function loadImagesFromDrive() {
         } catch (e) {
             toast(`Dossier "${DRIVE_FOLDER}" non sélectionné`);
             setLocalStatus('', '');
+            driveLog('  ✗ ' + e.message);
             return;
         }
 
@@ -2458,6 +2466,7 @@ async function loadImagesFromDrive() {
         } catch (e) {
             toast('Images : ' + e.message);
             setLocalStatus('Sous-dossier Images introuvable', 'error');
+            driveLog('  ✗ ' + e.message);
             return;
         }
 
@@ -2473,6 +2482,7 @@ async function loadImagesFromDrive() {
             throw new Error(`files.list ${listR.status}: ${errText.slice(0, 200) || listR.statusText}`);
         }
         const { files = [] } = await listR.json();
+        driveLog(`  ${files.length} image(s) trouvée(s) dans le dossier Images`);
 
         if (files.length === 0) {
             setLocalStatus('Aucune image trouvée dans le dossier Images', 'error');
@@ -2484,31 +2494,54 @@ async function loadImagesFromDrive() {
         Object.values(localImgCache).forEach(url => URL.revokeObjectURL(url));
         Object.keys(localImgCache).forEach(k => delete localImgCache[k]);
 
-        let count = 0;
-        for (const f of files) {
+        // Téléchargement par lots en parallèle (bien plus rapide qu'un par un),
+        // avec suivi de progression visible pendant l'opération.
+        const CONCURRENCY = 6;
+        let count = 0, failed = 0, done = 0;
+        setLocalStatus(`🖼 Téléchargement… (0/${files.length})`, '');
+
+        async function downloadOne(f) {
             try {
                 const blob = await downloadDriveFileBlob(f.id);
                 const url = URL.createObjectURL(blob);
                 const name = f.name;
                 const noExt = name.replace(/\.[^.]+$/, '');
-                localImgCache[name.toLowerCase()]             = url;
-                localImgCache[noExt.toLowerCase()]            = url;
+                localImgCache[name.toLowerCase()]              = url;
+                localImgCache[noExt.toLowerCase()]             = url;
                 localImgCache[`images/${name}`.toLowerCase()]  = url;
                 localImgCache[`images/${noExt}`.toLowerCase()] = url;
                 count++;
             } catch (e) {
+                failed++;
                 driveLog(`  ✗ image "${f.name}" : ${e.message}`);
+            } finally {
+                done++;
+                setLocalStatus(`🖼 Téléchargement… (${done}/${files.length})`, '');
             }
         }
 
-        setLocalStatus(`🖼 ${count} image(s) chargée(s) depuis Drive`, 'ok');
-        toast(`${count} image(s) chargée(s) depuis Drive`);
+        const queue = files.slice();
+        async function worker() {
+            while (queue.length) {
+                const f = queue.shift();
+                await downloadOne(f);
+            }
+        }
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, worker));
+
+        const msg = failed
+            ? `🖼 ${count} image(s) chargée(s), ${failed} échec(s)`
+            : `🖼 ${count} image(s) chargée(s) depuis Drive`;
+        setLocalStatus(msg, failed ? 'error' : 'ok');
+        toast(msg);
+        driveLog(`  ✓ terminé : ${count} chargée(s), ${failed} échec(s)`);
         if (typeof renderSvg === 'function' && svgData) renderSvg();
 
     } catch (e) {
         console.error('loadImagesFromDrive error:', e);
         toast('Erreur Drive Images : ' + e.message);
         setLocalStatus('Erreur Drive', 'error');
+        driveLog('  ✗ ERREUR : ' + e.message);
     }
 }
 
