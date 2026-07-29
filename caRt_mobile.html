@@ -2622,9 +2622,18 @@ async function getOrCreateFolder(name) {
             if (r.ok) {
                 const d = await r.json();
                 if (!d.trashed) {
-                    driveLog(`  getOrCreateFolder : id mémorisé valide → ${d.id} (${d.name})`);
-                    _cachedFolderId = d.id;
-                    return _cachedFolderId;
+                    // Garde-fou : si le dossier mémorisé ne s'appelle pas "Cartum",
+                    // c'est probablement une erreur de sélection passée (ex. le Picker
+                    // s'était ouvert dans un sous-dossier). On l'ignore et on redemande.
+                    if (d.name.toLowerCase() !== name.toLowerCase()) {
+                        driveLog(`  ⚠ getOrCreateFolder : dossier mémorisé "${d.name}" ≠ "${name}" attendu → ignoré, nouvelle sélection requise`);
+                        localStorage.removeItem(DRIVE_FOLDER_ID_KEY);
+                        toast(`⚠️ Le dossier mémorisé s'appelait "${d.name}" au lieu de "${name}" — merci de le resélectionner`);
+                    } else {
+                        driveLog(`  getOrCreateFolder : id mémorisé valide → ${d.id} (${d.name})`);
+                        _cachedFolderId = d.id;
+                        return _cachedFolderId;
+                    }
                 }
             }
         } catch (e) {
@@ -2637,6 +2646,22 @@ async function getOrCreateFolder(name) {
     driveLog(`  getOrCreateFolder : ouverture du sélecteur Google pour choisir "${name}"…`);
     const pickedId = await pickDriveFolder();
     if (!pickedId) throw new Error(`Aucun dossier "${name}" sélectionné`);
+
+    // Vérifier que le dossier choisi porte bien le nom attendu (le Picker Google
+    // s'ouvre parfois sur le dernier emplacement visité dans Drive — un sous-dossier
+    // peut être sélectionné par erreur si l'on ne remonte pas jusqu'à "Cartum").
+    try {
+        const rc = await fetch(`https://www.googleapis.com/drive/v3/files/${pickedId}?fields=id,name`, {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        if (rc.ok) {
+            const dc = await rc.json();
+            if (dc.name.toLowerCase() !== name.toLowerCase()) {
+                toast(`⚠️ Attention : vous avez choisi le dossier "${dc.name}", pas "${name}". Ré-ouvrez le sélecteur et remontez jusqu'à "${name}" avant de valider.`);
+                driveLog(`  ⚠ getOrCreateFolder : dossier choisi "${dc.name}" ≠ "${name}" attendu`);
+            }
+        }
+    } catch (e) { /* vérification best-effort, on continue quand même */ }
 
     localStorage.setItem(DRIVE_FOLDER_ID_KEY, pickedId);
     _cachedFolderId = pickedId;
