@@ -789,6 +789,7 @@
 <div id="imgModal">
     <button id="imgModalClose" onclick="closeImgModal()">✕</button>
     <img id="imgModalImg" src="" alt="">
+    <div id="imgModalLoading" style="display:none;color:#ddd;font-size:0.9rem">⏳ Chargement de l'image…</div>
     <div id="imgModalError">
         <span>⚠ Image introuvable</span>
         <span id="imgModalSrc" style="font-size:0.75rem;color:#aaa;word-break:break-all"></span>
@@ -1298,7 +1299,8 @@ function applyXform() {
 
 // ── LOAD LOCAL FILES ────────────────────────────────
 // ── DOSSIER IMAGES LOCAL ─────────────────────────────
-const localImgCache = {};  // { "images/Prop1809_07.jpg": "blob:..." }
+const localImgCache = {};  // { "images/Prop1809_07.jpg": "blob:..." }  → images déjà téléchargées (local OU Drive)
+const driveImgIndex = {};  // { "images/prop1809_07.jpg": {id, mimeType} } → catalogue Drive, pas encore téléchargées
 
 function loadLocalImgFolder(input) {
     const files = Array.from(input.files);
@@ -1307,6 +1309,7 @@ function loadLocalImgFolder(input) {
     // Révoquer les anciens blobs pour libérer la mémoire
     Object.values(localImgCache).forEach(url => URL.revokeObjectURL(url));
     Object.keys(localImgCache).forEach(k => delete localImgCache[k]);
+    Object.keys(driveImgIndex).forEach(k => delete driveImgIndex[k]);
 
     let count = 0;
     files.forEach(file => {
@@ -1329,16 +1332,101 @@ function loadLocalImgFolder(input) {
 }
 
 function resolveImgSrc(src) {
-    // Chercher dans le cache local (insensible à la casse, avec/sans dossier)
+    // Version synchrone (compatibilité) : ne renvoie que ce qui est déjà en cache.
     const key = src.toLowerCase();
     if (localImgCache[key]) return localImgCache[key];
-    // Essayer sans chemin de dossier
     const filename = src.split('/').pop().toLowerCase();
     if (localImgCache[filename]) return localImgCache[filename];
     const noExt = filename.replace(/\.[^.]+$/, '');
     if (localImgCache[noExt]) return localImgCache[noExt];
     return src; // fallback : chemin original
 }
+
+// Version asynchrone : si l'image n'est pas encore en cache mais qu'elle est
+// répertoriée dans le catalogue Drive (chargement à la demande), on la
+// télécharge maintenant, on la met en cache, puis on renvoie son blob URL.
+async function resolveImgSrcAsync(src) {
+    const cached = resolveImgSrc(src);
+    if (cached !== src) return cached; // déjà en cache (local ou Drive déjà téléchargée)
+
+    const key = src.toLowerCase();
+    const filename = src.split('/').pop().toLowerCase();
+    const noExt = filename.replace(/\.[^.]+$/, '');
+    const entry = driveImgIndex[key] || driveImgIndex[filename] || driveImgIndex[noExt];
+    if (!entry) return src; // ni en cache, ni au catalogue Drive → fallback
+
+    return downloadAndCacheDriveImg(entry);
+}
+
+// Téléchargement mutualisé d'une image Drive : si un téléchargement pour ce
+// même fichier est déjà en cours (lancé par le préchargement en arrière-plan
+// par exemple), on réutilise sa promesse au lieu de télécharger deux fois.
+const _driveImgDownloadsInFlight = {};
+function downloadAndCacheDriveImg(entry) {
+    const dedupeKey = entry.id;
+    if (_driveImgDownloadsInFlight[dedupeKey]) return _driveImgDownloadsInFlight[dedupeKey];
+
+    const p = (async () => {
+        const blob = await downloadDriveFileBlob(entry.id);
+        const url = URL.createObjectURL(blob);
+        const name = entry.name;
+        const nameNoExt = name.replace(/\.[^.]+$/, '');
+        localImgCache[name.toLowerCase()]              = url;
+        localImgCache[nameNoExt.toLowerCase()]         = url;
+        localImgCache[`images/${name}`.toLowerCase()]  = url;
+        localImgCache[`images/${nameNoExt}`.toLowerCase()] = url;
+        return url;
+    })();
+    _driveImgDownloadsInFlight[dedupeKey] = p;
+    p.finally(() => { delete _driveImgDownloadsInFlight[dedupeKey]; });
+    return p;
+}
+
+// ── Préchargement en arrière-plan de toutes les images indexées ──────
+// Ne bloque pas l'interface : l'utilisateur peut continuer à naviguer
+// pendant que ça télécharge. Si une image est ouverte avant son tour,
+// resolveImgSrcAsync() la télécharge immédiatement (et le préchargement,
+// en la retrouvant déjà en cache, passe simplement à la suivante).
+let _bgPrefetchRunning = false;
+async function backgroundPrefetchDriveImages(entries) {
+    if (_bgPrefetchRunning) { driveLog('  préchargement déjà en cours, ignoré'); return; }
+    _bgPrefetchRunning = true;
+
+    const CONCURRENCY = 4; // modéré, pour ne pas gêner une consultation en parallèle
+    const queue = entries.slice();
+    const total = queue.length;
+    let done = 0, failed = 0;
+
+    async function worker() {
+        while (queue.length) {
+            const entry = queue.shift();
+            if (!entry) continue;
+            const already = localImgCache[entry.name.toLowerCase()];
+            if (!already) {
+                try {
+                    await downloadAndCacheDriveImg(entry);
+                } catch (e) {
+                    failed++;
+                    driveLog(`  ✗ préchargement "${entry.name}" : ${e.message}`);
+                }
+            }
+            done++;
+            setLocalStatus(`🖼 Préchargement en arrière-plan… (${done}/${total})`, '');
+        }
+    }
+
+    driveLog(`  préchargement en arrière-plan démarré (${total} image(s))`);
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, total) }, worker));
+    _bgPrefetchRunning = false;
+
+    const msg = failed
+        ? `🖼 ${total - failed} image(s) préchargée(s), ${failed} échec(s)`
+        : `🖼 ${total} image(s) préchargées — toutes prêtes`;
+    setLocalStatus(msg, failed ? 'error' : 'ok');
+    toast(msg);
+    driveLog(`  ✓ préchargement terminé : ${total - failed}/${total}`);
+}
+
 
 function loadLocalSvg(input) {
     const file = input.files[0]; if (!file) return;
@@ -2436,10 +2524,16 @@ async function downloadDriveFileBlob(fileId, resourceKey) {
     return r.blob();
 }
 
-// ── Charge toutes les images depuis Drive : Cartum/Images ────────────
+// ── Indexe les images depuis Drive : Cartum/Images ────────────────────
 // Passe entièrement par l'API Drive (jamais par le sélecteur natif du
 // système), donc n'est jamais perturbé par le dernier dossier "visité"
 // lors du chargement du SVG ou du CSV.
+// Optimisation : on ne télécharge PAS toutes les images d'un coup (ça peut
+// être très long si le dossier en contient des dizaines/centaines). On se
+// contente de récupérer la liste (1 seul appel, quasi instantané) et de
+// mémoriser l'id Drive de chaque fichier ; le téléchargement réel n'a lieu
+// qu'à l'ouverture de l'image concernée (voir resolveImgSrcAsync), et le
+// résultat est mis en cache pour les consultations suivantes.
 async function loadImagesFromDrive() {
     if (!driveToken) {
         document.getElementById('localImgFolderInput').click();
@@ -2490,52 +2584,34 @@ async function loadImagesFromDrive() {
             return;
         }
 
-        // Vider le cache existant (mêmes règles que pour le dossier local)
+        // Vider les caches existants (image déjà téléchargées + ancien catalogue)
         Object.values(localImgCache).forEach(url => URL.revokeObjectURL(url));
         Object.keys(localImgCache).forEach(k => delete localImgCache[k]);
+        Object.keys(driveImgIndex).forEach(k => delete driveImgIndex[k]);
 
-        // Téléchargement par lots en parallèle (bien plus rapide qu'un par un),
-        // avec suivi de progression visible pendant l'opération.
-        const CONCURRENCY = 6;
-        let count = 0, failed = 0, done = 0;
-        setLocalStatus(`🖼 Téléchargement… (0/${files.length})`, '');
+        // Indexation seule (pas de téléchargement) : quasi instantané, même
+        // avec des centaines d'images.
+        files.forEach(f => {
+            const name = f.name;
+            const noExt = name.replace(/\.[^.]+$/, '');
+            const entry = { id: f.id, name, mimeType: f.mimeType };
+            driveImgIndex[name.toLowerCase()]              = entry;
+            driveImgIndex[noExt.toLowerCase()]             = entry;
+            driveImgIndex[`images/${name}`.toLowerCase()]  = entry;
+            driveImgIndex[`images/${noExt}`.toLowerCase()] = entry;
+        });
 
-        async function downloadOne(f) {
-            try {
-                const blob = await downloadDriveFileBlob(f.id);
-                const url = URL.createObjectURL(blob);
-                const name = f.name;
-                const noExt = name.replace(/\.[^.]+$/, '');
-                localImgCache[name.toLowerCase()]              = url;
-                localImgCache[noExt.toLowerCase()]             = url;
-                localImgCache[`images/${name}`.toLowerCase()]  = url;
-                localImgCache[`images/${noExt}`.toLowerCase()] = url;
-                count++;
-            } catch (e) {
-                failed++;
-                driveLog(`  ✗ image "${f.name}" : ${e.message}`);
-            } finally {
-                done++;
-                setLocalStatus(`🖼 Téléchargement… (${done}/${files.length})`, '');
-            }
-        }
-
-        const queue = files.slice();
-        async function worker() {
-            while (queue.length) {
-                const f = queue.shift();
-                await downloadOne(f);
-            }
-        }
-        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, worker));
-
-        const msg = failed
-            ? `🖼 ${count} image(s) chargée(s), ${failed} échec(s)`
-            : `🖼 ${count} image(s) chargée(s) depuis Drive`;
-        setLocalStatus(msg, failed ? 'error' : 'ok');
+        const msg = `🖼 ${files.length} image(s) indexée(s) — chargement en arrière-plan…`;
+        setLocalStatus(msg, 'ok');
         toast(msg);
-        driveLog(`  ✓ terminé : ${count} chargée(s), ${failed} échec(s)`);
-        if (typeof renderSvg === 'function' && svgData) renderSvg();
+        driveLog(`  ✓ ${files.length} image(s) indexée(s), lancement du préchargement en arrière-plan…`);
+
+        // Ne pas attendre : l'app reste utilisable pendant le téléchargement.
+        // Toute image ouverte avant son tour est de toute façon téléchargée
+        // immédiatement par resolveImgSrcAsync (voir openImgModal).
+        backgroundPrefetchDriveImages(Object.values(driveImgIndex).filter(
+            (e, i, arr) => arr.findIndex(x => x.id === e.id) === i // dédoublonner (4 clés → même entrée)
+        ));
 
     } catch (e) {
         console.error('loadImagesFromDrive error:', e);
@@ -2860,17 +2936,44 @@ async function updateDriveFile(fileId, content, mime) {
 }
 
 // ── IMAGE MODAL ──────────────────────────────────────
-function openImgModal(src) {
-    const resolved = resolveImgSrc(src);
+async function openImgModal(src) {
     const img = document.getElementById('imgModalImg');
     const err = document.getElementById('imgModalError');
+    const loading = document.getElementById('imgModalLoading');
     img.style.display = 'none';
     err.style.display = 'none';
+    loading.style.display = 'none';
     document.getElementById('imgModalSrc').textContent = src;
+    document.getElementById('imgModal').classList.add('open');
+
     img.onload  = () => { img.style.display = 'block'; err.style.display = 'none'; };
     img.onerror = () => { img.style.display = 'none'; err.style.display = 'flex'; };
-    img.src = resolved;
-    document.getElementById('imgModal').classList.add('open');
+
+    // Source déjà directement utilisable (base64, blob déjà résolu, URL absolue) → pas de résolution
+    if (/^(data:|blob:|https?:)/i.test(src)) {
+        img.src = src;
+        return;
+    }
+
+    // Déjà en cache (local ou Drive déjà téléchargée) ? Affichage immédiat.
+    const immediate = resolveImgSrc(src);
+    if (immediate !== src) {
+        img.src = immediate;
+        return;
+    }
+
+    // Sinon : peut-être répertoriée sur Drive → téléchargement à la demande
+    loading.style.display = 'block';
+    try {
+        const resolved = await resolveImgSrcAsync(src);
+        loading.style.display = 'none';
+        if (resolved === src) { err.style.display = 'flex'; return; }
+        img.src = resolved;
+    } catch (e) {
+        loading.style.display = 'none';
+        err.style.display = 'flex';
+        toast('Erreur au chargement de l\'image : ' + e.message);
+    }
 }
 function closeImgModal() {
     document.getElementById('imgModal').classList.remove('open');
