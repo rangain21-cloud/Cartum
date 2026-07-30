@@ -804,7 +804,7 @@
         <div class="modal-body" id="confirmMsg"></div>
         <div class="modal-btns">
             <button class="btn btn-success" onclick="confirmAction()">Confirmer</button>
-            <button class="btn btn-muted" onclick="document.getElementById('confirmModal').classList.remove('open')">Annuler</button>
+            <button class="btn btn-muted" onclick="confirmCancel()">Annuler</button>
         </div>
     </div>
 </div>
@@ -2983,14 +2983,22 @@ document.getElementById('imgModal').addEventListener('click', e => {
 });
 
 // ── CONFIRM DIALOG ───────────────────────────────────
-function confirm2(msg, cb) {
+let _confirmCancelCb = null;
+function confirm2(msg, cb, onCancel) {
     document.getElementById('confirmMsg').textContent = msg;
     _confirmCb = cb;
+    _confirmCancelCb = onCancel || null;
     document.getElementById('confirmModal').classList.add('open');
 }
 function confirmAction() {
     document.getElementById('confirmModal').classList.remove('open');
+    _confirmCancelCb = null;
     if (_confirmCb) { _confirmCb(); _confirmCb = null; }
+}
+function confirmCancel() {
+    document.getElementById('confirmModal').classList.remove('open');
+    _confirmCb = null;
+    if (_confirmCancelCb) { const cb = _confirmCancelCb; _confirmCancelCb = null; cb(); }
 }
 
 // ── TOAST ────────────────────────────────────────────
@@ -3244,6 +3252,41 @@ async function openPopulation() {
 
     await popStatsRefresh();
 }
+
+// ── GARDE BOUTON RETOUR ANDROID ───────────────────────
+// Piège la touche Retour matérielle/gestuelle Android : la première
+// pression ferme une éventuelle modale ouverte ou demande confirmation
+// avant de vraiment quitter/reculer dans l'appli.
+(function () {
+    let exiting = false;
+
+    function armBackGuard() {
+        history.pushState({ cartumBackGuard: true }, '', location.href);
+    }
+    armBackGuard(); // pose une entrée d'historique "piège" au chargement
+
+    window.addEventListener('popstate', () => {
+        if (exiting) return; // on laisse la navigation réelle se dérouler
+
+        const openModal = document.querySelector('.modal.open, #imgModal.open');
+        if (openModal) {
+            openModal.classList.remove('open');
+            armBackGuard(); // on réarme le piège pour la prochaine pression
+            return;
+        }
+
+        confirm2(
+            'Voulez-vous quitter Cartum ?',
+            () => {
+                exiting = true;
+                history.back(); // confirmé : le retour devient opérationnel
+            },
+            () => {
+                armBackGuard(); // annulé : on réarme le piège
+            }
+        );
+    });
+})();
 
 // ── INIT ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
