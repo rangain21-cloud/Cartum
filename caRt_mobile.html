@@ -421,6 +421,71 @@
         .modal-body { font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px; color: var(--text-muted); }
         .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
 
+        /* ─── ANIMATION MODAL (Population) ──────────── */
+        #animModal .modal-box {
+            max-width: 460px; max-height: 90vh; overflow-y: auto;
+        }
+        #animModal textarea {
+            width: 100%; box-sizing: border-box; min-height: 90px;
+            background: var(--bg-dark); border: 1px solid var(--border);
+            border-radius: 8px; color: var(--text); font-size: 0.75rem;
+            font-family: monospace; padding: 8px; resize: vertical;
+        }
+        #animModal input[type="text"] {
+            width: 100%; box-sizing: border-box;
+        }
+        .anim-field-label { font-size: 0.78rem; color: var(--text-muted); margin: 10px 0 4px; display: block; }
+        .anim-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
+        .anim-person-preview {
+            display: flex; align-items: center; gap: 10px; margin: 10px 0;
+            background: var(--bg-dark); border-radius: 10px; padding: 8px 10px;
+        }
+        .anim-avatar {
+            width: 44px; height: 44px; border-radius: 50%; object-fit: cover;
+            background: var(--border); border: 2px solid var(--accent); flex-shrink: 0;
+        }
+        .anim-chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+        .anim-chip {
+            display: flex; align-items: center; gap: 6px;
+            background: var(--bg-dark); border: 1px solid var(--border);
+            border-radius: 20px; padding: 3px 10px 3px 3px; font-size: 0.75rem;
+        }
+        .anim-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: var(--border); }
+        .anim-chip.conjoint { border-color: var(--accent3); }
+        .anim-chip.enfant { border-color: var(--accent2); }
+
+        /* Scène de marche */
+        #animStage {
+            position: relative; width: 100%; height: 260px;
+            background: linear-gradient(#1c2635, var(--bg-dark));
+            border-radius: 10px; overflow: hidden; margin-top: 12px;
+            border: 1px solid var(--border); display: none;
+        }
+        #animStage.show { display: block; }
+        .anim-figure {
+            position: absolute; top: -60px; display: flex; flex-direction: column; align-items: center;
+            animation-name: anim-walk-down; animation-timing-function: linear;
+            animation-fill-mode: forwards;
+        }
+        .anim-figure .anim-avatar { width: 30px; height: 30px; border-width: 1.5px; }
+        .anim-figure .anim-name {
+            font-size: 0.6rem; color: var(--text); margin-top: 2px;
+            text-shadow: 0 1px 2px #000; white-space: nowrap;
+        }
+        .anim-figure .anim-legs {
+            width: 14px; height: 10px; margin-top: 1px;
+            border-left: 2px solid var(--text-muted); border-right: 2px solid var(--text-muted);
+            animation: anim-legs-swing 0.45s ease-in-out infinite;
+        }
+        @keyframes anim-walk-down {
+            from { transform: translateY(0); }
+            to   { transform: translateY(300px); }
+        }
+        @keyframes anim-legs-swing {
+            0%, 100% { border-left-width: 4px; border-right-width: 1px; }
+            50%      { border-left-width: 1px; border-right-width: 4px; }
+        }
+
         /* ─── IMAGE MODAL ─────────────────────────── */
         #imgModal {
             position: fixed; inset: 0; z-index: 1000;
@@ -746,6 +811,9 @@
                 <button class="btn btn-primary btn-full" onclick="openPopulation()">
                     🔎 Rechercher dans l'arbre
                 </button>
+                <button class="btn btn-muted btn-full" style="margin-top:8px" onclick="openAnimModal()">
+                    🚶 Animation
+                </button>
 
                 <div class="divider" style="margin:14px 0"></div>
 
@@ -805,6 +873,44 @@
         <div class="modal-btns">
             <button class="btn btn-success" onclick="confirmAction()">Confirmer</button>
             <button class="btn btn-muted" onclick="confirmCancel()">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE ANIMATION POPULATION ══════════════════ -->
+<div class="modal" id="animModal">
+    <div class="modal-box">
+        <div class="modal-title">🚶 Animation — Population</div>
+        <div class="modal-body" style="margin-bottom:8px">
+            Fait « marcher » un individu de l'arbre Geneanet, accompagné de son
+            conjoint et de ses enfants encore en vie (décès vide ou postérieur au 31/12/1809).
+        </div>
+
+        <label class="anim-field-label">Identifiant Geneanet de l'individu</label>
+        <input type="text" id="animId" class="search-input" placeholder="ex : i=12345 ou p=jean&n=dupont">
+        <div style="display:flex;gap:8px;margin-top:6px">
+            <button class="btn btn-muted btn-sm" style="flex:1" onclick="animOpenGeneanetFiche()">🔗 Ouvrir sa fiche</button>
+            <button class="btn btn-muted btn-sm" style="flex:1" onclick="animLoadExample()">✨ Exemple</button>
+        </div>
+
+        <p class="anim-hint" style="margin-top:10px">
+            Le navigateur ne peut pas récupérer automatiquement le contenu de gw.geneanet.org
+            (le site bloque ces requêtes croisées). Ouvrez la fiche ci-dessus, puis collez ci-dessous
+            le portrait/prénom de l'individu et de ses proches au format JSON.
+        </p>
+        <label class="anim-field-label">Données (JSON)</label>
+        <textarea id="animJson" placeholder='{"prenom":"Jean","portrait":"https://...jpg","relations":[{"prenom":"Marie","portrait":"https://...jpg","relation":"conjoint","deces":""},{"prenom":"Paul","portrait":"https://...jpg","relation":"enfant","deces":"1830-05-02"}]}'></textarea>
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-primary" style="flex:1" onclick="animParseAndLoad()">📥 Charger</button>
+            <button class="btn btn-success" style="flex:1" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
+        </div>
+
+        <div id="animPreview"></div>
+        <div id="animStage"></div>
+
+        <div class="modal-btns" style="margin-top:14px">
+            <button class="btn btn-muted" onclick="closeAnimModal()">Fermer</button>
         </div>
     </div>
 </div>
@@ -3251,6 +3357,160 @@ async function openPopulation() {
     await popRecordVisit(base);
 
     await popStatsRefresh();
+}
+
+// ── ANIMATION POPULATION (marche des individus vivants) ──────────
+// Le navigateur ne peut pas récupérer/parcourir automatiquement le contenu
+// de gw.geneanet.org (requêtes cross-origin bloquées), comme pour la recherche
+// classique ci-dessus qui se contente d'ouvrir la fiche dans un nouvel onglet.
+// L'utilisateur colle donc ici le portrait/prénom de l'individu sélectionné et
+// de ses proches (JSON), et l'appli filtre les vivants puis lance leur marche.
+const ANIM_DEATH_CUTOFF = new Date('1809-12-31T23:59:59');
+let animData = null;
+
+function animEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+// Vivant si date de décès vide, ou strictement postérieure au 31/12/1809
+function animIsAlive(deces) {
+    if (!deces || !String(deces).trim()) return true;
+    const d = new Date(deces);
+    if (isNaN(d.getTime())) return true; // date non reconnue -> on ne l'exclut pas
+    return d > ANIM_DEATH_CUTOFF;
+}
+
+function openAnimModal() {
+    document.getElementById('animModal').classList.add('open');
+}
+function closeAnimModal() {
+    document.getElementById('animModal').classList.remove('open');
+}
+
+// Ouvre la fiche Geneanet de l'individu (même base que "Rechercher dans l'arbre")
+function animOpenGeneanetFiche() {
+    const user = (document.getElementById('popUser').value || '').trim();
+    const base = user ? user.toLowerCase() : 'pract';
+    const idRaw = (document.getElementById('animId').value || '').trim();
+    if (!idRaw) { toast("Indiquez d'abord l'identifiant de l'individu (ex : i=12345 ou p=jean&n=dupont)"); return; }
+    const url = `https://gw.geneanet.org/${base}?lang=fr&${idRaw}`;
+    window.open(url, '_blank', 'noopener');
+}
+
+function animLoadExample() {
+    const example = {
+        prenom: "Jean",
+        portrait: "https://placehold.co/100x100?text=Jean",
+        relations: [
+            { prenom: "Marie",  portrait: "https://placehold.co/100x100?text=Marie",  relation: "conjoint", deces: "" },
+            { prenom: "Paul",   portrait: "https://placehold.co/100x100?text=Paul",   relation: "enfant",   deces: "1830-05-02" },
+            { prenom: "Louise", portrait: "https://placehold.co/100x100?text=Louise", relation: "enfant",   deces: "1795-01-10" }
+        ]
+    };
+    document.getElementById('animJson').value = JSON.stringify(example, null, 2);
+    animParseAndLoad();
+}
+
+function animParseAndLoad() {
+    const raw = (document.getElementById('animJson').value || '').trim();
+    if (!raw) { toast("Collez d'abord les données JSON de l'individu"); return; }
+    let data;
+    try { data = JSON.parse(raw); }
+    catch (e) { toast('JSON invalide : ' + e.message); return; }
+    if (!data.prenom) { toast('Le champ "prenom" est requis dans le JSON'); return; }
+    data.relations = Array.isArray(data.relations) ? data.relations : [];
+
+    animData = data;
+    document.getElementById('animStage').classList.remove('show');
+    document.getElementById('animStage').innerHTML = '';
+    document.getElementById('animLaunchBtn').disabled = false;
+    animRenderPreview();
+}
+
+function animRenderPreview() {
+    if (!animData) return;
+    const spouses  = animData.relations.filter(r => r.relation === 'conjoint' && animIsAlive(r.deces));
+    const children = animData.relations.filter(r => r.relation === 'enfant'   && animIsAlive(r.deces));
+
+    let html = `<div class="anim-person-preview">
+        <img class="anim-avatar" src="${animEsc(animData.portrait || '')}" onerror="this.style.opacity=0.3">
+        <div>
+            <div style="font-weight:700">${animEsc(animData.prenom)}</div>
+            <div style="font-size:0.72rem;color:var(--text-muted)">Individu principal</div>
+        </div>
+    </div>`;
+
+    if (spouses.length) {
+        html += `<span class="anim-field-label">Conjoint(e) en vie</span><div class="anim-chip-row">` +
+            spouses.map(s => `<span class="anim-chip conjoint"><img src="${animEsc(s.portrait || '')}" onerror="this.style.opacity=0.3">${animEsc(s.prenom)}</span>`).join('') +
+            `</div>`;
+    }
+    if (children.length) {
+        html += `<span class="anim-field-label">Enfants en vie</span><div class="anim-chip-row">` +
+            children.map(c => `<span class="anim-chip enfant"><img src="${animEsc(c.portrait || '')}" onerror="this.style.opacity=0.3">${animEsc(c.prenom)}</span>`).join('') +
+            `</div>`;
+    }
+    if (!spouses.length && !children.length) {
+        html += `<p class="anim-hint">Aucun proche encore en vie (décès vide ou postérieur au 31/12/1809) dans les données fournies.</p>`;
+    }
+    document.getElementById('animPreview').innerHTML = html;
+}
+
+// Ajoute une silhouette animée sur la scène ; delay/duration en secondes
+function animAddFigure(stage, person, xPx, delaySec, durationSec) {
+    const fig = document.createElement('div');
+    fig.className = 'anim-figure';
+    fig.style.left = xPx + 'px';
+    fig.style.animationDelay = delaySec + 's';
+    fig.style.animationDuration = durationSec + 's';
+    fig.innerHTML = `
+        <img class="anim-avatar" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
+        <div class="anim-legs"></div>
+        <div class="anim-name">${animEsc(person.prenom || '')}</div>
+    `;
+    stage.appendChild(fig);
+}
+
+// Lance la marche : l'individu principal descend au centre, son (ses) conjoint(e)s
+// marchent à ses côtés (même rythme), ses enfants marchent derrière lui (léger retard).
+// Point d'accroche pour l'app externe "Banana Animation" si elle est connectée un jour :
+// window.BananaAnimation?.walk(...) prendrait ici le relais de la marche maison ci-dessous.
+function animLaunch() {
+    if (!animData) { toast("Chargez d'abord les données de l'individu"); return; }
+    const stage = document.getElementById('animStage');
+    stage.innerHTML = '';
+    stage.classList.add('show');
+
+    const spouses  = animData.relations.filter(r => r.relation === 'conjoint' && animIsAlive(r.deces));
+    const children = animData.relations.filter(r => r.relation === 'enfant'   && animIsAlive(r.deces));
+
+    if (window.BananaAnimation && typeof window.BananaAnimation.walk === 'function') {
+        // Intégration future si l'app "Banana Animation" est connectée (MCP)
+        window.BananaAnimation.walk({ main: animData, spouses, children, stageEl: stage });
+        return;
+    }
+
+    const stageWidth = stage.clientWidth || 300;
+    const centerX = stageWidth / 2 - 15;
+
+    // Individu principal : marche de haut en bas, au centre
+    animAddFigure(stage, animData, centerX, 0, 6);
+
+    // Conjoint(e)s : à ses côtés, au même rythme
+    spouses.forEach((s, i) => {
+        const side = (i % 2 === 0) ? 1 : -1;
+        const offset = side * 34 * (Math.floor(i / 2) + 1);
+        animAddFigure(stage, s, centerX + offset, 0, 6);
+    });
+
+    // Enfants : derrière lui (léger retard de départ), en ligne
+    const spacing = 30;
+    const startX = centerX - ((children.length - 1) * spacing) / 2;
+    children.forEach((c, i) => {
+        animAddFigure(stage, c, startX + i * spacing, 0.5, 6.5);
+    });
 }
 
 // ── GARDE BOUTON RETOUR ANDROID ───────────────────────
