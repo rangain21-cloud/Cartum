@@ -3417,8 +3417,23 @@ function animParseAndLoad() {
     const raw = (document.getElementById('animJson').value || '').trim();
     if (!raw) { toast("Collez d'abord les données JSON de l'individu"); return; }
     let data;
-    try { data = JSON.parse(raw); }
-    catch (e) { toast('JSON invalide : ' + e.message); return; }
+    try {
+        data = JSON.parse(raw);
+    } catch (e1) {
+        // Le copier-coller (notamment depuis une page Geneanet) glisse parfois des
+        // caractères de contrôle invisibles (retours à la ligne bruts dans une valeur,
+        // espaces insécables, etc.) qui font échouer un JSON.parse strict.
+        // On les neutralise puis on retente avant d'abandonner.
+        const cleaned = raw
+            .replace(/\u00a0/g, ' ')                 // espace insécable -> espace normal
+            .replace(/[\u0000-\u001F\u007F]/g, ' ');  // autres caractères de contrôle -> espace
+        try {
+            data = JSON.parse(cleaned);
+        } catch (e2) {
+            toast('JSON invalide : ' + e1.message);
+            return;
+        }
+    }
     if (!data.prenom) { toast('Le champ "prenom" est requis dans le JSON'); return; }
     data.relations = Array.isArray(data.relations) ? data.relations : [];
 
