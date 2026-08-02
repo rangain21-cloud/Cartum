@@ -3452,10 +3452,18 @@ function animLoadExample() {
     animParseAndLoad();
 }
 
+// Répare les erreurs les plus fréquentes de collage d'une valeur data:image/...;base64,... :
+// guillemets manquants, ET/OU retours à la ligne ou espaces glissés au milieu du base64
+// (fréquent quand on copie un bloc "Code" affiché sur plusieurs lignes par un site tiers).
+function animRepairImageJson(text) {
+    return text.replace(
+        /"?(data:image\/[a-zA-Z0-9.+-]+;base64,)([A-Za-z0-9+/=\s]+)"?/g,
+        (match, prefix, body) => `"${prefix}${body.replace(/\s+/g, '')}"`
+    );
+}
 function animShowJsonError(e, raw) {
-    // Cas fréquent : une valeur data:image/...;base64,... collée sans guillemets
-    if (/:\s*data:image\//.test(raw) && !/:\s*"data:image\//.test(raw)) {
-        toast('JSON invalide : la valeur "data:image/..." doit être entre guillemets, ex. "portrait":"data:image/jpeg;base64,...".');
+    if (/data:image\//.test(raw)) {
+        toast('JSON invalide autour d\'une image : vérifiez que la valeur "data:image/..." est entre guillemets et sur une seule ligne, sans espace ni retour à la ligne au milieu.');
     } else {
         toast('JSON invalide : ' + e.message);
     }
@@ -3465,34 +3473,23 @@ function animParseAndLoad() {
     const raw = (document.getElementById('animJson').value || '').trim();
     if (!raw) { toast("Collez d'abord les données JSON de l'individu"); return; }
     let data;
-    let text = raw;
     try {
-        data = JSON.parse(text);
+        data = JSON.parse(raw);
     } catch (e1) {
-        // 1) Le copier-coller (notamment depuis une page Geneanet) glisse parfois des
-        //    caractères de contrôle invisibles (retours à la ligne bruts dans une valeur,
-        //    espaces insécables, etc.) qui font échouer un JSON.parse strict.
-        text = raw
-            .replace(/\u00a0/g, ' ')                 // espace insécable -> espace normal
-            .replace(/[\u0000-\u001F\u007F]/g, ' ');  // autres caractères de contrôle -> espace
+        // 1) Répare les valeurs data:image/...;base64,... mal guillemetées ou coupées sur
+        //    plusieurs lignes (cas le plus fréquent lors d'un copier-coller).
+        let repaired = animRepairImageJson(raw);
         try {
-            data = JSON.parse(text);
+            data = JSON.parse(repaired);
+            toast("Image détectée et reformatée automatiquement (guillemets/espaces corrigés).");
         } catch (e2) {
-            // 2) Erreur fréquente : une valeur data:image/...;base64,... oubliée sans guillemets
-            //    -> on tente de la re-guillemeter automatiquement avant d'abandonner.
-            const repaired = text.replace(
-                /:(\s*)(data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+)/g,
-                ':$1"$2"'
-            );
-            if (repaired !== text) {
-                try {
-                    data = JSON.parse(repaired);
-                    toast("Guillemets manquants autour d'une image détectés et corrigés automatiquement.");
-                } catch (e3) {
-                    animShowJsonError(e1, raw);
-                    return;
-                }
-            } else {
+            // 2) Sinon, on neutralise les autres caractères de contrôle invisibles résiduels
+            //    (espace insécable, etc.) et on retente une dernière fois.
+            repaired = repaired.replace(/\u00a0/g, ' ').replace(/[\u0000-\u001F\u007F]/g, ' ');
+            try {
+                data = JSON.parse(repaired);
+                toast('Données corrigées automatiquement.');
+            } catch (e3) {
                 animShowJsonError(e1, raw);
                 return;
             }
