@@ -472,8 +472,8 @@
             background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px;
             padding: 8px 10px; margin-bottom: 6px;
         }
-        .anim-event-item .anim-event-label { font-weight: 600; font-size: 0.82rem; }
-        .anim-event-item .anim-event-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+        .anim-event-item .anim-event-label { font-family: Calibri, 'Segoe UI', sans-serif; font-size: 10pt; font-weight: 600; }
+        .anim-event-item .anim-event-meta { font-family: Calibri, 'Segoe UI', sans-serif; font-size: 10pt; color: var(--text-muted); margin-top: 2px; }
         .anim-figure { cursor: pointer; }
         .anim-figure:active .anim-avatar { filter: brightness(0.8); }
         .anim-photo-btn {
@@ -503,27 +503,44 @@
         .anim-figure {
             position: absolute; display: flex; flex-direction: column; align-items: center;
             animation-name: anim-walk-down; animation-timing-function: linear;
-            animation-fill-mode: forwards;
+            animation-fill-mode: forwards; cursor: pointer;
         }
-        /* Taille des portraits/jambes/prénom fixée dynamiquement en JS (inline style),
-           pour s'adapter à la place réellement disponible et éviter tout chevauchement. */
-        .anim-figure .anim-avatar { border-width: 3px; }
+        /* Toutes les tailles (tête/buste/membres/prénom) sont fixées dynamiquement en JS
+           (inline style), pour s'adapter à la place réellement disponible sur la scène. */
+        .anim-body { position: relative; }
+        .anim-body .anim-avatar {
+            position: absolute; border-radius: 50%; object-fit: cover; z-index: 3;
+            background: var(--border); border: 3px solid var(--accent);
+        }
+        .anim-torso {
+            position: absolute; z-index: 2; border-radius: 45% 45% 35% 35%;
+            background: var(--text-muted); opacity: 0.9;
+        }
+        .anim-limb {
+            position: absolute; border-radius: 999px; background: var(--text-muted); opacity: 0.9;
+            animation-timing-function: ease-in-out; animation-iteration-count: infinite;
+        }
+        .anim-limb.anim-leg { z-index: 1; transform-origin: top center; }
+        .anim-limb.anim-arm { z-index: 3; transform-origin: top center; }
+        .anim-limb.swing-a { animation-name: anim-swing-a; }
+        .anim-limb.swing-b { animation-name: anim-swing-b; }
         .anim-figure .anim-name {
             font-weight: 600; color: var(--text); margin-top: 4px;
             text-shadow: 0 1px 3px #000; white-space: nowrap;
-        }
-        .anim-figure .anim-legs {
-            margin-top: 3px;
-            border-left: 0.32em solid var(--text-muted); border-right: 0.09em solid var(--text-muted);
-            animation: anim-legs-swing 0.7s ease-in-out infinite;
         }
         @keyframes anim-walk-down {
             from { transform: translateY(0); }
             to   { transform: translateY(var(--anim-walk-distance, 700px)); }
         }
-        @keyframes anim-legs-swing {
-            0%, 100% { border-left-width: 0.32em; border-right-width: 0.09em; }
-            50%      { border-left-width: 0.09em; border-right-width: 0.32em; }
+        /* Un pas naturel : une jambe/le bras opposé partent en avant pendant que l'autre
+           couple part en arrière, puis inversement (comme une vraie marche). */
+        @keyframes anim-swing-a {
+            0%, 100% { transform: rotate(-24deg); }
+            50%      { transform: rotate(24deg); }
+        }
+        @keyframes anim-swing-b {
+            0%, 100% { transform: rotate(24deg); }
+            50%      { transform: rotate(-24deg); }
         }
 
         /* ─── IMAGE MODAL ─────────────────────────── */
@@ -3910,21 +3927,61 @@ function animSetRelationPhoto(idx, input) {
 
 // Ajoute une silhouette animée sur la scène ; delay/duration en secondes ;
 // avatarPx/figureHeight/walkDistance sont calculés par animLaunch selon la place disponible.
-function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, figureHeight, walkDistance) {
+// Calcule la géométrie du petit personnage (tête/buste/bras/jambes/prénom) à partir
+// de la seule taille de la tête (avatarPx), pour rester cohérent entre le calcul de
+// la hauteur de scène (animLaunch) et le dessin réel du corps (animAddFigure).
+function animFigureMetrics(avatarPx) {
+    const head = avatarPx;
+    const torsoW = Math.round(avatarPx * 0.58);
+    const torsoH = Math.round(avatarPx * 0.85);
+    const limbW = Math.max(3, Math.round(avatarPx * 0.13));
+    const legH = Math.round(avatarPx * 0.78);
+    const armH = Math.round(avatarPx * 0.60);
+    const bodyW = Math.round(avatarPx * 1.15);
+    const headOverlap = Math.round(avatarPx * 0.42); // le buste remonte un peu sous la tête
+    const legOverlap = Math.round(avatarPx * 0.10);
+    const bodyH = head + torsoH + legH - headOverlap - legOverlap;
+    const nameSize = Math.max(11, Math.round(avatarPx * 0.15));
+    const nameHeight = Math.round(nameSize * 1.6) + 6;
+    return { head, torsoW, torsoH, limbW, legH, armH, bodyW, headOverlap, legOverlap, bodyH, nameSize, nameHeight,
+             figureHeight: bodyH + nameHeight };
+}
+
+// Ajoute une silhouette animée sur la scène (tête = photo, buste, bras, jambes qui se
+// balancent naturellement) ; delay/duration en secondes ; avatarPx/walkDistance sont
+// calculés par animLaunch selon la place disponible.
+function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, walkDistance) {
+    const m = animFigureMetrics(avatarPx);
     const fig = document.createElement('div');
     fig.className = 'anim-figure';
     fig.style.left = xPx + 'px';
-    fig.style.top = (-figureHeight) + 'px';
+    fig.style.top = (-m.figureHeight) + 'px';
     fig.style.animationDelay = delaySec + 's';
     fig.style.animationDuration = durationSec + 's';
     fig.style.setProperty('--anim-walk-distance', walkDistance + 'px');
-    const legW = Math.round(avatarPx * 0.32);
-    const legH = Math.round(avatarPx * 0.24);
-    const nameSize = Math.max(11, Math.round(avatarPx * 0.15));
+
+    // Cadence des pas liée à la vitesse de déplacement (marche plus lente = pas plus lents)
+    const swingDur = Math.max(0.45, Math.min(1.2, durationSec / 24));
+
+    const cx = m.bodyW / 2;
+    const torsoTop = m.head - m.headOverlap;
+    const legTop = torsoTop + m.torsoH - m.legOverlap;
+    const armTop = torsoTop + Math.round(avatarPx * 0.05);
+    const legLeftX  = Math.round(cx - m.torsoW * 0.30 - m.limbW / 2);
+    const legRightX = Math.round(cx + m.torsoW * 0.30 - m.limbW / 2);
+    const armLeftX  = Math.round(cx - m.torsoW / 2 - m.limbW * 0.75);
+    const armRightX = Math.round(cx + m.torsoW / 2 - m.limbW * 0.25);
+
     fig.innerHTML = `
-        <img class="anim-avatar" style="width:${avatarPx}px;height:${avatarPx}px" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
-        <div class="anim-legs" style="width:${legW}px;height:${legH}px;font-size:${avatarPx}px"></div>
-        <div class="anim-name" style="font-size:${nameSize}px">${animEsc(person.prenom || '')}</div>
+        <div class="anim-body" style="width:${m.bodyW}px;height:${m.bodyH}px">
+            <div class="anim-limb anim-leg swing-a" style="left:${legLeftX}px;top:${legTop}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
+            <div class="anim-limb anim-leg swing-b" style="left:${legRightX}px;top:${legTop}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
+            <div class="anim-torso" style="left:${Math.round(cx - m.torsoW / 2)}px;top:${torsoTop}px;width:${m.torsoW}px;height:${m.torsoH}px"></div>
+            <div class="anim-limb anim-arm swing-b" style="left:${armLeftX}px;top:${armTop}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
+            <div class="anim-limb anim-arm swing-a" style="left:${armRightX}px;top:${armTop}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
+            <img class="anim-avatar" style="width:${m.head}px;height:${m.head}px;left:${Math.round(cx - m.head / 2)}px;top:0" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
+        </div>
+        <div class="anim-name" style="font-size:${m.nameSize}px">${animEsc(person.prenom || '')}</div>
     `;
     fig.addEventListener('click', () => animPauseAndShowIndi(person));
     stage.appendChild(fig);
@@ -3965,21 +4022,21 @@ function animLaunch() {
     avatarPx = Math.max(56, Math.min(avatarPx, 210)); // grossi (x3-4 vs les 52px d'origine), sans dépasser la place dispo
     const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
 
-    const figureHeight = Math.round(avatarPx * 1.55);      // portrait + jambes + prénom
-    const stageHeight  = Math.round(figureHeight * 2.6);
-    const walkDistance = stageHeight + figureHeight + 40;   // pour que chacun traverse toute la scène
+    const figMetrics = animFigureMetrics(avatarPx);
+    const stageHeight  = Math.round(figMetrics.figureHeight * 2.6);
+    const walkDistance = stageHeight + figMetrics.figureHeight + 40; // pour que chacun traverse toute la scène
     stage.style.height = stageHeight + 'px';
 
-    const centerX = stageWidth / 2 - avatarPx / 2;
+    const centerX = stageWidth / 2 - figMetrics.bodyW / 2;
 
     // Individu principal : marche de haut en bas, au centre
-    animAddFigure(stage, animData, centerX, 0, BASE_DURATION, avatarPx, figureHeight, walkDistance);
+    animAddFigure(stage, animData, centerX, 0, BASE_DURATION, avatarPx, walkDistance);
 
     // Conjoint(e)s : à ses côtés, au même rythme
     spouses.forEach((s, i) => {
         const side = (i % 2 === 0) ? 1 : -1;
         const offset = side * step * (Math.floor(i / 2) + 1);
-        animAddFigure(stage, s, centerX + offset, 0, BASE_DURATION, avatarPx, figureHeight, walkDistance);
+        animAddFigure(stage, s, centerX + offset, 0, BASE_DURATION, avatarPx, walkDistance);
     });
 
     // Enfants : derrière lui, en ligne, du plus âgé (proche, arrive tôt) au plus jeune
@@ -3996,21 +4053,21 @@ function animLaunch() {
     childrenWithAge.forEach((c, i) => {
         const ageGap = (maxAge != null && c.age != null) ? (maxAge - c.age) : i * 2; // repli si âge inconnu
         const delay = CHILD_BASE_DELAY + Math.min(ageGap * PER_YEAR_DELAY, 8);
-        animAddFigure(stage, c, startX + i * step, delay, BASE_DURATION + 1, avatarPx, figureHeight, walkDistance);
+        animAddFigure(stage, c, startX + i * step, delay, BASE_DURATION + 1, avatarPx, walkDistance);
     });
 }
 
 // ── FICHE INDIVIDU (clic sur une silhouette pendant la marche) ───
-// Met en pause toutes les silhouettes (marche + balancement des jambes) et affiche
+// Met en pause toutes les silhouettes (marche + balancement des bras/jambes) et affiche
 // la fiche détaillée de l'individu cliqué, avec ses événements triés chronologiquement.
 function animPauseAndShowIndi(person) {
-    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-legs').forEach(el => {
+    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-limb').forEach(el => {
         el.style.animationPlayState = 'paused';
     });
     animShowIndiModal(person);
 }
 function animResumeAnimation() {
-    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-legs').forEach(el => {
+    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-limb').forEach(el => {
         el.style.animationPlayState = 'running';
     });
 }
