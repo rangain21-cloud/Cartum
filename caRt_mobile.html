@@ -474,6 +474,10 @@
         }
         .anim-event-item .anim-event-label { font-family: Calibri, 'Segoe UI', sans-serif; font-size: 10pt; font-weight: 600; }
         .anim-event-item .anim-event-meta { font-family: Calibri, 'Segoe UI', sans-serif; font-size: 10pt; color: var(--text-muted); margin-top: 2px; }
+        .anim-event-item .anim-event-note {
+            font-family: Calibri, 'Segoe UI', sans-serif; font-size: 10pt; color: var(--text);
+            margin-top: 6px; white-space: pre-line; line-height: 1.4;
+        }
         .anim-figure { cursor: pointer; }
         .anim-figure:active .anim-avatar { filter: brightness(0.8); }
         .anim-photo-btn {
@@ -505,16 +509,13 @@
             animation-name: anim-walk-down; animation-timing-function: linear;
             animation-fill-mode: forwards; cursor: pointer;
         }
-        /* Toutes les tailles (tête/buste/membres/prénom) sont fixées dynamiquement en JS
+        /* Toutes les tailles (buste/membres/prénom) sont fixées dynamiquement en JS
            (inline style), pour s'adapter à la place réellement disponible sur la scène. */
         .anim-body { position: relative; }
         .anim-body .anim-avatar {
-            position: absolute; border-radius: 50%; object-fit: cover; z-index: 3;
+            position: absolute; border-radius: 42% 42% 12% 12%; z-index: 2;
+            object-fit: cover; object-position: top center; /* ne garde que tête + haut du corps */
             background: var(--border); border: 3px solid var(--accent);
-        }
-        .anim-torso {
-            position: absolute; z-index: 2; border-radius: 45% 45% 35% 35%;
-            background: var(--text-muted); opacity: 0.9;
         }
         .anim-limb {
             position: absolute; border-radius: 999px; background: var(--text-muted); opacity: 0.9;
@@ -3574,7 +3575,7 @@ const ANIM_GED_EVENT_LABELS = {
 function animParseGedcom(text) {
     const individuals = new Map();
     const families = new Map();
-    let curIndi = null, curFam = null, context = null, curEvent = null;
+    let curIndi = null, curFam = null, context = null, curEvent = null, curNoteTarget = null;
     const lines = text.split(/\r\n|\r|\n/);
     for (const rawLine of lines) {
         const line = rawLine.trim();
@@ -3589,10 +3590,10 @@ function animParseGedcom(text) {
             const xref = parts[0].replace(/@/g, '');
             const tag = parts[1];
             if (tag === 'INDI') {
-                curIndi = xref; curFam = null; context = null; curEvent = null;
+                curIndi = xref; curFam = null; context = null; curEvent = null; curNoteTarget = null;
                 individuals.set(curIndi, { id: curIndi, name: '', sex: '', birt: '', deat: '', famc: [], fams: [], events: [] });
             } else if (tag === 'FAM') {
-                curFam = xref; curIndi = null; context = null; curEvent = null;
+                curFam = xref; curIndi = null; context = null; curEvent = null; curNoteTarget = null;
                 families.set(curFam, { id: curFam, husb: '', wife: '', chil: [], events: [] });
             }
             continue;
@@ -3602,43 +3603,65 @@ function animParseGedcom(text) {
         const tag = sp === -1 ? remainder : remainder.slice(0, sp);
         const value = sp === -1 ? '' : remainder.slice(sp + 1).trim();
 
+        // Continuation d'un texte libre (NOTE) réparti sur plusieurs lignes GEDCOM
+        if (curNoteTarget && level >= 3 && (tag === 'CONT' || tag === 'CONC')) {
+            curNoteTarget.note += (tag === 'CONT' ? '\n' : '') + value;
+            continue;
+        }
+
         if (curIndi && level === 1) {
             context = tag;
+            curNoteTarget = null;
             const p = individuals.get(curIndi);
             if (tag === 'NAME') p.name = value;
             else if (tag === 'SEX') p.sex = value;
             else if (tag === 'FAMC') p.famc.push(value.replace(/@/g, ''));
             else if (tag === 'FAMS') p.fams.push(value.replace(/@/g, ''));
             if (ANIM_GED_EVENT_TAGS.has(tag)) {
-                curEvent = { tag, date: '', place: '' };
+                curEvent = { tag, type: '', date: '', place: '', note: value || '' };
                 p.events.push(curEvent);
             } else {
                 curEvent = null;
             }
         } else if (curIndi && level === 2) {
             const p = individuals.get(curIndi);
+            curNoteTarget = null;
             if (tag === 'DATE') {
                 if ((context === 'BIRT' || context === 'CHR') && !p.birt) p.birt = value;
                 else if (context === 'DEAT') p.deat = value;
                 if (curEvent) curEvent.date = value;
             } else if (tag === 'PLAC' && curEvent) {
                 curEvent.place = value;
+            } else if (tag === 'TYPE' && curEvent) {
+                curEvent.type = value;
+            } else if (tag === 'NOTE' && curEvent) {
+                curEvent.note = curEvent.note ? curEvent.note + ' ' + value : value;
+                curNoteTarget = curEvent;
             }
         }
         if (curFam && level === 1) {
             const f = families.get(curFam);
+            curNoteTarget = null;
             if (tag === 'HUSB') f.husb = value.replace(/@/g, '');
             else if (tag === 'WIFE') f.wife = value.replace(/@/g, '');
             else if (tag === 'CHIL') f.chil.push(value.replace(/@/g, ''));
             if (ANIM_GED_EVENT_TAGS.has(tag)) {
-                curEvent = { tag, date: '', place: '' };
+                curEvent = { tag, type: '', date: '', place: '', note: value || '' };
                 f.events.push(curEvent);
             } else {
                 curEvent = null;
             }
-        } else if (curFam && level === 2 && curEvent) {
-            if (tag === 'DATE') curEvent.date = value;
-            else if (tag === 'PLAC') curEvent.place = value;
+        } else if (curFam && level === 2) {
+            curNoteTarget = null;
+            if (curEvent) {
+                if (tag === 'DATE') curEvent.date = value;
+                else if (tag === 'PLAC') curEvent.place = value;
+                else if (tag === 'TYPE') curEvent.type = value;
+                else if (tag === 'NOTE') {
+                    curEvent.note = curEvent.note ? curEvent.note + ' ' + value : value;
+                    curNoteTarget = curEvent;
+                }
+            }
         }
     }
 
@@ -3649,8 +3672,8 @@ function animParseGedcom(text) {
         const husb = f.husb ? individuals.get(f.husb) : null;
         const wife = f.wife ? individuals.get(f.wife) : null;
         f.events.forEach(evt => {
-            if (husb) husb.events.push({ tag: evt.tag, date: evt.date, place: evt.place, withName: wife ? wife.name.replace(/\//g, ' ').trim() : '' });
-            if (wife) wife.events.push({ tag: evt.tag, date: evt.date, place: evt.place, withName: husb ? husb.name.replace(/\//g, ' ').trim() : '' });
+            if (husb) husb.events.push({ tag: evt.tag, type: evt.type, date: evt.date, place: evt.place, note: evt.note, withName: wife ? wife.name.replace(/\//g, ' ').trim() : '' });
+            if (wife) wife.events.push({ tag: evt.tag, type: evt.type, date: evt.date, place: evt.place, note: evt.note, withName: husb ? husb.name.replace(/\//g, ' ').trim() : '' });
         });
     });
 
@@ -3662,9 +3685,10 @@ function animParseGedcom(text) {
 function animGedEventsForDisplay(p) {
     const list = (p.events || []).map(e => {
         let label = ANIM_GED_EVENT_LABELS[e.tag] || e.tag;
+        if (e.type) label += ' — ' + e.type;
         if (e.tag === 'MARR' && e.withName) label += ' avec ' + e.withName;
         else if (e.tag === 'DIV' && e.withName) label += ' de ' + e.withName;
-        return { label, dateDisplay: e.date || '', dateISO: animGedDateToISO(e.date), place: e.place || '' };
+        return { label, dateDisplay: e.date || '', dateISO: animGedDateToISO(e.date), place: e.place || '', note: (e.note || '').trim() };
     });
     list.forEach((e, i) => { e._i = i; }); // conserve l'ordre d'origine pour les événements non datés
     list.sort((a, b) => {
@@ -3927,29 +3951,28 @@ function animSetRelationPhoto(idx, input) {
 
 // Ajoute une silhouette animée sur la scène ; delay/duration en secondes ;
 // avatarPx/figureHeight/walkDistance sont calculés par animLaunch selon la place disponible.
-// Calcule la géométrie du petit personnage (tête/buste/bras/jambes/prénom) à partir
-// de la seule taille de la tête (avatarPx), pour rester cohérent entre le calcul de
+// Calcule la géométrie du petit personnage (buste photo + bras/jambes/prénom) à partir
+// de la seule largeur du buste (avatarPx), pour rester cohérent entre le calcul de
 // la hauteur de scène (animLaunch) et le dessin réel du corps (animAddFigure).
 function animFigureMetrics(avatarPx) {
-    const head = avatarPx;
-    const torsoW = Math.round(avatarPx * 0.58);
-    const torsoH = Math.round(avatarPx * 0.85);
-    const limbW = Math.max(3, Math.round(avatarPx * 0.13));
-    const legH = Math.round(avatarPx * 0.78);
-    const armH = Math.round(avatarPx * 0.60);
-    const bodyW = Math.round(avatarPx * 1.15);
-    const headOverlap = Math.round(avatarPx * 0.42); // le buste remonte un peu sous la tête
-    const legOverlap = Math.round(avatarPx * 0.10);
-    const bodyH = head + torsoH + legH - headOverlap - legOverlap;
+    const bustW = avatarPx;
+    const bustH = Math.round(avatarPx * 1.3); // ne garde que tête + haut du corps (recadré en haut de la photo)
+    const limbW = Math.max(3, Math.round(avatarPx * 0.14));
+    const legH = Math.round(avatarPx * 0.85);
+    const armH = Math.round(avatarPx * 0.62);
+    const shoulderY = Math.round(bustH * 0.5);   // hauteur d'accroche des bras sur le buste
+    const waistY = Math.round(bustH * 0.9);       // hauteur d'accroche des jambes (bas du buste)
+    const bodyW = Math.round(avatarPx * 1.25);
+    const bodyH = waistY + legH;
     const nameSize = Math.max(11, Math.round(avatarPx * 0.15));
     const nameHeight = Math.round(nameSize * 1.6) + 6;
-    return { head, torsoW, torsoH, limbW, legH, armH, bodyW, headOverlap, legOverlap, bodyH, nameSize, nameHeight,
+    return { bustW, bustH, limbW, legH, armH, shoulderY, waistY, bodyW, bodyH, nameSize, nameHeight,
              figureHeight: bodyH + nameHeight };
 }
 
-// Ajoute une silhouette animée sur la scène (tête = photo, buste, bras, jambes qui se
-// balancent naturellement) ; delay/duration en secondes ; avatarPx/walkDistance sont
-// calculés par animLaunch selon la place disponible.
+// Ajoute une silhouette animée sur la scène (buste = photo recadrée tête+corps, bras et
+// jambes CSS qui se balancent naturellement) ; delay/duration en secondes ; avatarPx/
+// walkDistance sont calculés par animLaunch selon la place disponible.
 function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, walkDistance) {
     const m = animFigureMetrics(avatarPx);
     const fig = document.createElement('div');
@@ -3964,22 +3987,18 @@ function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, walk
     const swingDur = Math.max(0.45, Math.min(1.2, durationSec / 24));
 
     const cx = m.bodyW / 2;
-    const torsoTop = m.head - m.headOverlap;
-    const legTop = torsoTop + m.torsoH - m.legOverlap;
-    const armTop = torsoTop + Math.round(avatarPx * 0.05);
-    const legLeftX  = Math.round(cx - m.torsoW * 0.30 - m.limbW / 2);
-    const legRightX = Math.round(cx + m.torsoW * 0.30 - m.limbW / 2);
-    const armLeftX  = Math.round(cx - m.torsoW / 2 - m.limbW * 0.75);
-    const armRightX = Math.round(cx + m.torsoW / 2 - m.limbW * 0.25);
+    const legLeftX  = Math.round(cx - m.bustW * 0.22 - m.limbW / 2);
+    const legRightX = Math.round(cx + m.bustW * 0.22 - m.limbW / 2);
+    const armLeftX  = Math.round(cx - m.bustW / 2 - m.limbW * 0.7);
+    const armRightX = Math.round(cx + m.bustW / 2 - m.limbW * 0.3);
 
     fig.innerHTML = `
         <div class="anim-body" style="width:${m.bodyW}px;height:${m.bodyH}px">
-            <div class="anim-limb anim-leg swing-a" style="left:${legLeftX}px;top:${legTop}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
-            <div class="anim-limb anim-leg swing-b" style="left:${legRightX}px;top:${legTop}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
-            <div class="anim-torso" style="left:${Math.round(cx - m.torsoW / 2)}px;top:${torsoTop}px;width:${m.torsoW}px;height:${m.torsoH}px"></div>
-            <div class="anim-limb anim-arm swing-b" style="left:${armLeftX}px;top:${armTop}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
-            <div class="anim-limb anim-arm swing-a" style="left:${armRightX}px;top:${armTop}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
-            <img class="anim-avatar" style="width:${m.head}px;height:${m.head}px;left:${Math.round(cx - m.head / 2)}px;top:0" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
+            <div class="anim-limb anim-leg swing-a" style="left:${legLeftX}px;top:${m.waistY}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
+            <div class="anim-limb anim-leg swing-b" style="left:${legRightX}px;top:${m.waistY}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
+            <div class="anim-limb anim-arm swing-b" style="left:${armLeftX}px;top:${m.shoulderY}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
+            <div class="anim-limb anim-arm swing-a" style="left:${armRightX}px;top:${m.shoulderY}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
+            <img class="anim-avatar" style="width:${m.bustW}px;height:${m.bustH}px;left:${Math.round(cx - m.bustW / 2)}px;top:0" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
         </div>
         <div class="anim-name" style="font-size:${m.nameSize}px">${animEsc(person.prenom || '')}</div>
     `;
@@ -4097,6 +4116,7 @@ function animShowIndiModal(person) {
         html += events.map(e => `<div class="anim-event-item">
             <div class="anim-event-label">${animEsc(e.label)}</div>
             <div class="anim-event-meta">${animEsc(e.dateDisplay || 'date inconnue')}${e.place ? ' — ' + animEsc(e.place) : ''}</div>
+            ${e.note ? `<div class="anim-event-note">${animEsc(e.note)}</div>` : ''}
         </div>`).join('');
     } else {
         html += `<p class="anim-hint">Aucun événement disponible pour cet individu (chargez un fichier GEDCOM pour un historique complet).</p>`;
