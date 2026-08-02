@@ -425,6 +425,9 @@
         #animModal .modal-box {
             max-width: min(94vw, 640px); max-height: 90vh; overflow-y: auto;
         }
+        #animIndiModal .modal-box {
+            max-width: 420px; max-height: 85vh; overflow-y: auto;
+        }
         #animModal textarea {
             width: 100%; box-sizing: border-box; min-height: 90px;
             background: var(--bg-dark); border: 1px solid var(--border);
@@ -509,22 +512,14 @@
             animation-name: anim-walk-down; animation-timing-function: linear;
             animation-fill-mode: forwards; cursor: pointer;
         }
-        /* Toutes les tailles (buste/membres/prénom) sont fixées dynamiquement en JS
+        /* Toutes les tailles (buste/prénom) sont fixées dynamiquement en JS
            (inline style), pour s'adapter à la place réellement disponible sur la scène. */
         .anim-body { position: relative; }
         .anim-body .anim-avatar {
-            position: absolute; border-radius: 42% 42% 12% 12%; z-index: 2;
+            position: absolute; border-radius: 42% 42% 12% 12%;
             object-fit: cover; object-position: top center; /* ne garde que tête + haut du corps */
             background: var(--border); border: 3px solid var(--accent);
         }
-        .anim-limb {
-            position: absolute; border-radius: 999px; background: var(--text-muted); opacity: 0.9;
-            animation-timing-function: ease-in-out; animation-iteration-count: infinite;
-        }
-        .anim-limb.anim-leg { z-index: 1; transform-origin: top center; }
-        .anim-limb.anim-arm { z-index: 3; transform-origin: top center; }
-        .anim-limb.swing-a { animation-name: anim-swing-a; }
-        .anim-limb.swing-b { animation-name: anim-swing-b; }
         .anim-figure .anim-name {
             font-weight: 600; color: var(--text); margin-top: 4px;
             text-shadow: 0 1px 3px #000; white-space: nowrap;
@@ -532,16 +527,6 @@
         @keyframes anim-walk-down {
             from { transform: translateY(0); }
             to   { transform: translateY(var(--anim-walk-distance, 700px)); }
-        }
-        /* Un pas naturel : une jambe/le bras opposé partent en avant pendant que l'autre
-           couple part en arrière, puis inversement (comme une vraie marche). */
-        @keyframes anim-swing-a {
-            0%, 100% { transform: rotate(-24deg); }
-            50%      { transform: rotate(24deg); }
-        }
-        @keyframes anim-swing-b {
-            0%, 100% { transform: rotate(24deg); }
-            50%      { transform: rotate(-24deg); }
         }
 
         /* ─── IMAGE MODAL ─────────────────────────── */
@@ -1009,7 +994,7 @@
 
 <!-- ══ MODALE DÉTAIL INDIVIDU (clic sur une silhouette) ══ -->
 <div class="modal" id="animIndiModal">
-    <div class="modal-box" style="max-width:420px">
+    <div class="modal-box">
         <div class="modal-title">📜 Fiche de l'individu</div>
         <div id="animIndiModalBody"></div>
         <div class="modal-btns" style="margin-top:14px">
@@ -3951,28 +3936,23 @@ function animSetRelationPhoto(idx, input) {
 
 // Ajoute une silhouette animée sur la scène ; delay/duration en secondes ;
 // avatarPx/figureHeight/walkDistance sont calculés par animLaunch selon la place disponible.
-// Calcule la géométrie du petit personnage (buste photo + bras/jambes/prénom) à partir
-// de la seule largeur du buste (avatarPx), pour rester cohérent entre le calcul de
-// la hauteur de scène (animLaunch) et le dessin réel du corps (animAddFigure).
+// Calcule la géométrie du petit personnage (buste photo + prénom) à partir de la
+// seule largeur du buste (avatarPx), pour rester cohérent entre le calcul de la
+// hauteur de scène (animLaunch) et le dessin réel du buste (animAddFigure).
 function animFigureMetrics(avatarPx) {
     const bustW = avatarPx;
     const bustH = Math.round(avatarPx * 1.3); // ne garde que tête + haut du corps (recadré en haut de la photo)
-    const limbW = Math.max(3, Math.round(avatarPx * 0.14));
-    const legH = Math.round(avatarPx * 0.85);
-    const armH = Math.round(avatarPx * 0.62);
-    const shoulderY = Math.round(bustH * 0.5);   // hauteur d'accroche des bras sur le buste
-    const waistY = Math.round(bustH * 0.9);       // hauteur d'accroche des jambes (bas du buste)
-    const bodyW = Math.round(avatarPx * 1.25);
-    const bodyH = waistY + legH;
+    const bodyW = Math.round(avatarPx * 1.1);
+    const bodyH = bustH;
     const nameSize = Math.max(11, Math.round(avatarPx * 0.15));
     const nameHeight = Math.round(nameSize * 1.6) + 6;
-    return { bustW, bustH, limbW, legH, armH, shoulderY, waistY, bodyW, bodyH, nameSize, nameHeight,
+    return { bustW, bustH, bodyW, bodyH, nameSize, nameHeight,
              figureHeight: bodyH + nameHeight };
 }
 
-// Ajoute une silhouette animée sur la scène (buste = photo recadrée tête+corps, bras et
-// jambes CSS qui se balancent naturellement) ; delay/duration en secondes ; avatarPx/
-// walkDistance sont calculés par animLaunch selon la place disponible.
+// Ajoute une silhouette animée sur la scène (buste = photo recadrée tête+corps, sans
+// bras ni jambes) ; delay/duration en secondes ; avatarPx/walkDistance sont calculés
+// par animLaunch selon la place disponible.
 function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, walkDistance) {
     const m = animFigureMetrics(avatarPx);
     const fig = document.createElement('div');
@@ -3983,21 +3963,10 @@ function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, walk
     fig.style.animationDuration = durationSec + 's';
     fig.style.setProperty('--anim-walk-distance', walkDistance + 'px');
 
-    // Cadence des pas liée à la vitesse de déplacement (marche plus lente = pas plus lents)
-    const swingDur = Math.max(0.45, Math.min(1.2, durationSec / 24));
-
     const cx = m.bodyW / 2;
-    const legLeftX  = Math.round(cx - m.bustW * 0.22 - m.limbW / 2);
-    const legRightX = Math.round(cx + m.bustW * 0.22 - m.limbW / 2);
-    const armLeftX  = Math.round(cx - m.bustW / 2 - m.limbW * 0.7);
-    const armRightX = Math.round(cx + m.bustW / 2 - m.limbW * 0.3);
 
     fig.innerHTML = `
         <div class="anim-body" style="width:${m.bodyW}px;height:${m.bodyH}px">
-            <div class="anim-limb anim-leg swing-a" style="left:${legLeftX}px;top:${m.waistY}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
-            <div class="anim-limb anim-leg swing-b" style="left:${legRightX}px;top:${m.waistY}px;width:${m.limbW}px;height:${m.legH}px;animation-duration:${swingDur}s"></div>
-            <div class="anim-limb anim-arm swing-b" style="left:${armLeftX}px;top:${m.shoulderY}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
-            <div class="anim-limb anim-arm swing-a" style="left:${armRightX}px;top:${m.shoulderY}px;width:${m.limbW}px;height:${m.armH}px;animation-duration:${swingDur}s"></div>
             <img class="anim-avatar" style="width:${m.bustW}px;height:${m.bustH}px;left:${Math.round(cx - m.bustW / 2)}px;top:0" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
         </div>
         <div class="anim-name" style="font-size:${m.nameSize}px">${animEsc(person.prenom || '')}</div>
@@ -4077,16 +4046,16 @@ function animLaunch() {
 }
 
 // ── FICHE INDIVIDU (clic sur une silhouette pendant la marche) ───
-// Met en pause toutes les silhouettes (marche + balancement des bras/jambes) et affiche
-// la fiche détaillée de l'individu cliqué, avec ses événements triés chronologiquement.
+// Met en pause toutes les silhouettes et affiche la fiche détaillée de l'individu
+// cliqué, avec ses événements triés chronologiquement.
 function animPauseAndShowIndi(person) {
-    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-limb').forEach(el => {
+    document.querySelectorAll('#animStage .anim-figure').forEach(el => {
         el.style.animationPlayState = 'paused';
     });
     animShowIndiModal(person);
 }
 function animResumeAnimation() {
-    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-limb').forEach(el => {
+    document.querySelectorAll('#animStage .anim-figure').forEach(el => {
         el.style.animationPlayState = 'running';
     });
 }
