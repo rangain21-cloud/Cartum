@@ -479,35 +479,36 @@
 
         /* Scène de marche */
         #animStage {
-            position: relative; width: 100%; height: 620px;
+            position: relative; width: 100%; min-height: 300px;
             background: linear-gradient(#1c2635, var(--bg-dark));
             border-radius: 10px; overflow: hidden; margin-top: 12px;
             border: 1px solid var(--border); display: none;
         }
         #animStage.show { display: block; }
         .anim-figure {
-            position: absolute; top: -300px; display: flex; flex-direction: column; align-items: center;
+            position: absolute; display: flex; flex-direction: column; align-items: center;
             animation-name: anim-walk-down; animation-timing-function: linear;
             animation-fill-mode: forwards;
         }
-        /* Photos ~3 à 4x plus grandes que l'ancienne taille (52px), qui s'adaptent à la largeur d'écran */
-        .anim-figure .anim-avatar { width: clamp(90px, 24vw, 210px); height: clamp(90px, 24vw, 210px); border-width: 3px; }
+        /* Taille des portraits/jambes/prénom fixée dynamiquement en JS (inline style),
+           pour s'adapter à la place réellement disponible et éviter tout chevauchement. */
+        .anim-figure .anim-avatar { border-width: 3px; }
         .anim-figure .anim-name {
-            font-size: clamp(0.85rem, 2.6vw, 1.25rem); font-weight: 600; color: var(--text); margin-top: 4px;
+            font-weight: 600; color: var(--text); margin-top: 4px;
             text-shadow: 0 1px 3px #000; white-space: nowrap;
         }
         .anim-figure .anim-legs {
-            width: clamp(28px, 7vw, 66px); height: clamp(20px, 5vw, 48px); margin-top: 3px;
-            border-left: 4px solid var(--text-muted); border-right: 4px solid var(--text-muted);
+            margin-top: 3px;
+            border-left: 0.32em solid var(--text-muted); border-right: 0.09em solid var(--text-muted);
             animation: anim-legs-swing 0.7s ease-in-out infinite;
         }
         @keyframes anim-walk-down {
             from { transform: translateY(0); }
-            to   { transform: translateY(700px); }
+            to   { transform: translateY(var(--anim-walk-distance, 700px)); }
         }
         @keyframes anim-legs-swing {
-            0%, 100% { border-left-width: 7px; border-right-width: 2px; }
-            50%      { border-left-width: 2px; border-right-width: 7px; }
+            0%, 100% { border-left-width: 0.32em; border-right-width: 0.09em; }
+            50%      { border-left-width: 0.09em; border-right-width: 0.32em; }
         }
 
         /* ─── IMAGE MODAL ─────────────────────────── */
@@ -3810,17 +3811,23 @@ function animSetRelationPhoto(idx, input) {
     reader.readAsDataURL(file);
 }
 
-// Ajoute une silhouette animée sur la scène ; delay/duration en secondes
-function animAddFigure(stage, person, xPx, delaySec, durationSec) {
+// Ajoute une silhouette animée sur la scène ; delay/duration en secondes ;
+// avatarPx/figureHeight/walkDistance sont calculés par animLaunch selon la place disponible.
+function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, figureHeight, walkDistance) {
     const fig = document.createElement('div');
     fig.className = 'anim-figure';
     fig.style.left = xPx + 'px';
+    fig.style.top = (-figureHeight) + 'px';
     fig.style.animationDelay = delaySec + 's';
     fig.style.animationDuration = durationSec + 's';
+    fig.style.setProperty('--anim-walk-distance', walkDistance + 'px');
+    const legW = Math.round(avatarPx * 0.32);
+    const legH = Math.round(avatarPx * 0.24);
+    const nameSize = Math.max(11, Math.round(avatarPx * 0.15));
     fig.innerHTML = `
-        <img class="anim-avatar" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
-        <div class="anim-legs"></div>
-        <div class="anim-name">${animEsc(person.prenom || '')}</div>
+        <img class="anim-avatar" style="width:${avatarPx}px;height:${avatarPx}px" src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
+        <div class="anim-legs" style="width:${legW}px;height:${legH}px;font-size:${avatarPx}px"></div>
+        <div class="anim-name" style="font-size:${nameSize}px">${animEsc(person.prenom || '')}</div>
     `;
     stage.appendChild(fig);
 }
@@ -3846,23 +3853,39 @@ function animLaunch() {
         return;
     }
 
-    const stageWidth = stage.clientWidth || 300;
-    const centerX = stageWidth / 2 - 26;
+    const stageWidth = stage.clientWidth || 320;
     const BASE_DURATION = 16; // secondes : marche ralentie (était 6s)
 
+    // Taille des portraits calculée pour remplir la scène sans jamais faire chevaucher
+    // les personnages : on prend en compte la ligne la plus chargée (principal + conjoint(e)s,
+    // ou les enfants), avec un espace entre cercles proportionnel à leur taille.
+    const mainRowCount  = 1 + spouses.length;
+    const childRowCount = Math.max(children.length, 1);
+    const widestRow      = Math.max(mainRowCount, childRowCount);
+    const GAP_RATIO       = 0.28; // espace entre deux cercles, en fraction de leur taille
+    let avatarPx = stageWidth / (widestRow + (widestRow - 1) * GAP_RATIO);
+    avatarPx = Math.max(56, Math.min(avatarPx, 210)); // grossi (x3-4 vs les 52px d'origine), sans dépasser la place dispo
+    const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
+
+    const figureHeight = Math.round(avatarPx * 1.55);      // portrait + jambes + prénom
+    const stageHeight  = Math.round(figureHeight * 2.6);
+    const walkDistance = stageHeight + figureHeight + 40;   // pour que chacun traverse toute la scène
+    stage.style.height = stageHeight + 'px';
+
+    const centerX = stageWidth / 2 - avatarPx / 2;
+
     // Individu principal : marche de haut en bas, au centre
-    animAddFigure(stage, animData, centerX, 0, BASE_DURATION);
+    animAddFigure(stage, animData, centerX, 0, BASE_DURATION, avatarPx, figureHeight, walkDistance);
 
     // Conjoint(e)s : à ses côtés, au même rythme
     spouses.forEach((s, i) => {
         const side = (i % 2 === 0) ? 1 : -1;
-        const offset = side * 60 * (Math.floor(i / 2) + 1);
-        animAddFigure(stage, s, centerX + offset, 0, BASE_DURATION);
+        const offset = side * step * (Math.floor(i / 2) + 1);
+        animAddFigure(stage, s, centerX + offset, 0, BASE_DURATION, avatarPx, figureHeight, walkDistance);
     });
 
     // Enfants : derrière lui, en ligne, du plus âgé (proche, arrive tôt) au plus jeune
     // (loin derrière, arrive tard) — le décalage est proportionnel à l'écart d'âge.
-    const spacing = 52;
     const CHILD_BASE_DELAY = 1;    // secondes avant le départ du premier enfant
     const PER_YEAR_DELAY = 0.2;    // secondes de retard supplémentaire par année d'écart d'âge
 
@@ -3871,11 +3894,11 @@ function animLaunch() {
     const maxAge = knownAges.length ? Math.max(...knownAges) : null;
     childrenWithAge.sort((a, b) => (b.age != null ? b.age : -1) - (a.age != null ? a.age : -1));
 
-    const startX = centerX - ((childrenWithAge.length - 1) * spacing) / 2;
+    const startX = centerX - ((childrenWithAge.length - 1) * step) / 2;
     childrenWithAge.forEach((c, i) => {
         const ageGap = (maxAge != null && c.age != null) ? (maxAge - c.age) : i * 2; // repli si âge inconnu
         const delay = CHILD_BASE_DELAY + Math.min(ageGap * PER_YEAR_DELAY, 8);
-        animAddFigure(stage, c, startX + i * spacing, delay, BASE_DURATION + 1);
+        animAddFigure(stage, c, startX + i * step, delay, BASE_DURATION + 1, avatarPx, figureHeight, walkDistance);
     });
 }
 
