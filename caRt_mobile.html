@@ -895,9 +895,24 @@
 
         <p class="anim-hint" style="margin-top:10px">
             Le navigateur ne peut pas récupérer automatiquement le contenu de gw.geneanet.org
-            (le site bloque ces requêtes croisées). Ouvrez la fiche ci-dessus, puis collez ci-dessous
-            le portrait/prénom de l'individu et de ses proches au format JSON.
+            (le site bloque ces requêtes croisées). Ouvrez la fiche ci-dessus pour relever
+            les informations, puis complétez ci-dessous.
         </p>
+
+        <label class="anim-field-label">Portrait de l'individu principal (optionnel)</label>
+        <div style="display:flex;align-items:center;gap:10px">
+            <img id="animPortraitPreviewImg" class="anim-avatar" style="display:none;width:44px;height:44px">
+            <label class="btn btn-muted btn-sm" style="flex:1;text-align:center;margin:0">
+                📷 Choisir une photo
+                <input type="file" id="animPortraitInput" accept="image/*" style="display:none" onchange="animPreviewPortrait(this)">
+            </label>
+            <button class="btn btn-muted btn-sm" id="animPortraitClearBtn" style="display:none" onclick="animClearPortrait()">✕</button>
+        </div>
+        <p class="anim-hint" style="margin-top:4px">
+            Ne collez jamais le contenu d'une image directement dans le champ JSON ci-dessous
+            (ce n'est pas du JSON valide) : utilisez ce bouton, ou une URL d'image dans le champ "portrait".
+        </p>
+
         <label class="anim-field-label">Données (JSON)</label>
         <textarea id="animJson" placeholder='{"prenom":"Jean","portrait":"https://...jpg","relations":[{"prenom":"Marie","portrait":"https://...jpg","relation":"conjoint","deces":""},{"prenom":"Paul","portrait":"https://...jpg","relation":"enfant","deces":"1830-05-02"}]}'></textarea>
 
@@ -3389,6 +3404,30 @@ function closeAnimModal() {
     document.getElementById('animModal').classList.remove('open');
 }
 
+// Portrait de l'individu principal chargé via fichier (évite de coller du base64 dans le JSON)
+let animPendingPortrait = null;
+function animPreviewPortrait(input) {
+    const file = input.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        animPendingPortrait = e.target.result; // data URL complète, prête pour un <img src>
+        const img = document.getElementById('animPortraitPreviewImg');
+        img.src = animPendingPortrait;
+        img.style.display = 'block';
+        document.getElementById('animPortraitClearBtn').style.display = 'inline-block';
+        // Si des données sont déjà chargées, on met à jour l'aperçu tout de suite
+        if (animData) { animData.portrait = animPendingPortrait; animRenderPreview(); }
+    };
+    reader.readAsDataURL(file);
+}
+function animClearPortrait() {
+    animPendingPortrait = null;
+    document.getElementById('animPortraitInput').value = '';
+    document.getElementById('animPortraitPreviewImg').style.display = 'none';
+    document.getElementById('animPortraitClearBtn').style.display = 'none';
+    if (animData) { delete animData.portrait; animRenderPreview(); }
+}
+
 // Ouvre la fiche Geneanet de l'individu (même base que "Rechercher dans l'arbre")
 function animOpenGeneanetFiche() {
     const user = (document.getElementById('popUser').value || '').trim();
@@ -3436,6 +3475,7 @@ function animParseAndLoad() {
     }
     if (!data.prenom) { toast('Le champ "prenom" est requis dans le JSON'); return; }
     data.relations = Array.isArray(data.relations) ? data.relations : [];
+    if (animPendingPortrait) data.portrait = animPendingPortrait; // la photo uploadée prime sur une URL du JSON
 
     animData = data;
     document.getElementById('animStage').classList.remove('show');
