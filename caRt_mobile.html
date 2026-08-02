@@ -461,6 +461,21 @@
         .anim-rel-row .anim-avatar { width: 36px; height: 36px; flex-shrink: 0; }
         .anim-rel-name { flex: 1; font-size: 0.8rem; min-width: 0; }
         .anim-rel-tag { font-size: 0.65rem; color: var(--text-muted); }
+        .anim-indi-header {
+            display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+        }
+        .anim-indi-header img {
+            width: 64px; height: 64px; border-radius: 50%; object-fit: cover;
+            background: var(--border); border: 2px solid var(--accent); flex-shrink: 0;
+        }
+        .anim-event-item {
+            background: var(--bg-dark); border: 1px solid var(--border); border-radius: 8px;
+            padding: 8px 10px; margin-bottom: 6px;
+        }
+        .anim-event-item .anim-event-label { font-weight: 600; font-size: 0.82rem; }
+        .anim-event-item .anim-event-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+        .anim-figure { cursor: pointer; }
+        .anim-figure:active .anim-avatar { filter: brightness(0.8); }
         .anim-photo-btn {
             flex-shrink: 0; width: 34px; height: 34px; padding: 0; margin: 0;
             display: flex; align-items: center; justify-content: center; font-size: 1rem;
@@ -970,6 +985,17 @@
 
         <div class="modal-btns" style="margin-top:14px">
             <button class="btn btn-muted" onclick="closeAnimModal()">Fermer</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE DÉTAIL INDIVIDU (clic sur une silhouette) ══ -->
+<div class="modal" id="animIndiModal">
+    <div class="modal-box" style="max-width:420px">
+        <div class="modal-title">📜 Fiche de l'individu</div>
+        <div id="animIndiModalBody"></div>
+        <div class="modal-btns" style="margin-top:14px">
+            <button class="btn btn-primary" onclick="animCloseIndiModal()">↩ Reprendre l'animation</button>
         </div>
     </div>
 </div>
@@ -3511,10 +3537,27 @@ function animGedSurname(name) {
     return (parts[1] || '').trim();
 }
 
+// Balises GEDCOM reconnues comme "événements" (avec DATE/PLAC éventuels en sous-niveau)
+const ANIM_GED_EVENT_TAGS = new Set([
+    'BIRT', 'CHR', 'BAPM', 'BARM', 'BASM', 'BLES', 'CHRA', 'CONF', 'FCOM', 'ORDN',
+    'DEAT', 'BURI', 'CREM', 'PROB', 'WILL',
+    'ADOP', 'NATU', 'EMIG', 'IMMI', 'CENS', 'GRAD', 'RETI', 'OCCU', 'RESI', 'TITL', 'EVEN',
+    'MARR', 'ENGA', 'DIV', 'MARB', 'MARC'
+]);
+const ANIM_GED_EVENT_LABELS = {
+    BIRT: 'Naissance', CHR: 'Baptême (acte)', BAPM: 'Baptême', BARM: 'Bar-mitzvah', BASM: 'Bat-mitzvah',
+    BLES: 'Bénédiction', CHRA: 'Baptême adulte', CONF: 'Confirmation', FCOM: 'Première communion',
+    ORDN: 'Ordination', DEAT: 'Décès', BURI: 'Inhumation', CREM: 'Crémation', PROB: 'Homologation testament',
+    WILL: 'Testament', ADOP: 'Adoption', NATU: 'Naturalisation', EMIG: 'Émigration', IMMI: 'Immigration',
+    CENS: 'Recensement', GRAD: 'Diplôme', RETI: 'Retraite', OCCU: 'Profession', RESI: 'Résidence',
+    TITL: 'Titre', EVEN: 'Événement', MARR: 'Mariage', ENGA: 'Fiançailles', DIV: 'Divorce',
+    MARB: 'Bans de mariage', MARC: 'Contrat de mariage'
+};
+
 function animParseGedcom(text) {
     const individuals = new Map();
     const families = new Map();
-    let curIndi = null, curFam = null, context = null;
+    let curIndi = null, curFam = null, context = null, curEvent = null;
     const lines = text.split(/\r\n|\r|\n/);
     for (const rawLine of lines) {
         const line = rawLine.trim();
@@ -3529,11 +3572,11 @@ function animParseGedcom(text) {
             const xref = parts[0].replace(/@/g, '');
             const tag = parts[1];
             if (tag === 'INDI') {
-                curIndi = xref; curFam = null; context = null;
-                individuals.set(curIndi, { id: curIndi, name: '', sex: '', birt: '', deat: '', famc: [], fams: [] });
+                curIndi = xref; curFam = null; context = null; curEvent = null;
+                individuals.set(curIndi, { id: curIndi, name: '', sex: '', birt: '', deat: '', famc: [], fams: [], events: [] });
             } else if (tag === 'FAM') {
-                curFam = xref; curIndi = null; context = null;
-                families.set(curFam, { id: curFam, husb: '', wife: '', chil: [] });
+                curFam = xref; curIndi = null; context = null; curEvent = null;
+                families.set(curFam, { id: curFam, husb: '', wife: '', chil: [], events: [] });
             }
             continue;
         }
@@ -3549,19 +3592,71 @@ function animParseGedcom(text) {
             else if (tag === 'SEX') p.sex = value;
             else if (tag === 'FAMC') p.famc.push(value.replace(/@/g, ''));
             else if (tag === 'FAMS') p.fams.push(value.replace(/@/g, ''));
-        } else if (curIndi && level === 2 && tag === 'DATE') {
+            if (ANIM_GED_EVENT_TAGS.has(tag)) {
+                curEvent = { tag, date: '', place: '' };
+                p.events.push(curEvent);
+            } else {
+                curEvent = null;
+            }
+        } else if (curIndi && level === 2) {
             const p = individuals.get(curIndi);
-            if ((context === 'BIRT' || context === 'CHR') && !p.birt) p.birt = value;
-            else if (context === 'DEAT') p.deat = value;
+            if (tag === 'DATE') {
+                if ((context === 'BIRT' || context === 'CHR') && !p.birt) p.birt = value;
+                else if (context === 'DEAT') p.deat = value;
+                if (curEvent) curEvent.date = value;
+            } else if (tag === 'PLAC' && curEvent) {
+                curEvent.place = value;
+            }
         }
         if (curFam && level === 1) {
             const f = families.get(curFam);
             if (tag === 'HUSB') f.husb = value.replace(/@/g, '');
             else if (tag === 'WIFE') f.wife = value.replace(/@/g, '');
             else if (tag === 'CHIL') f.chil.push(value.replace(/@/g, ''));
+            if (ANIM_GED_EVENT_TAGS.has(tag)) {
+                curEvent = { tag, date: '', place: '' };
+                f.events.push(curEvent);
+            } else {
+                curEvent = null;
+            }
+        } else if (curFam && level === 2 && curEvent) {
+            if (tag === 'DATE') curEvent.date = value;
+            else if (tag === 'PLAC') curEvent.place = value;
         }
     }
+
+    // Rattache les événements de couple (mariage, divorce...) aux DEUX conjoints,
+    // avec le nom de l'autre, pour qu'ils apparaissent dans la fiche de chacun.
+    families.forEach(f => {
+        if (!f.events.length) return;
+        const husb = f.husb ? individuals.get(f.husb) : null;
+        const wife = f.wife ? individuals.get(f.wife) : null;
+        f.events.forEach(evt => {
+            if (husb) husb.events.push({ tag: evt.tag, date: evt.date, place: evt.place, withName: wife ? wife.name.replace(/\//g, ' ').trim() : '' });
+            if (wife) wife.events.push({ tag: evt.tag, date: evt.date, place: evt.place, withName: husb ? husb.name.replace(/\//g, ' ').trim() : '' });
+        });
+    });
+
     return { individuals, families };
+}
+
+// Convertit les événements bruts d'un individu GEDCOM en liste d'affichage, triée
+// chronologiquement (événements non datés relégués à la fin, dans leur ordre d'origine).
+function animGedEventsForDisplay(p) {
+    const list = (p.events || []).map(e => {
+        let label = ANIM_GED_EVENT_LABELS[e.tag] || e.tag;
+        if (e.tag === 'MARR' && e.withName) label += ' avec ' + e.withName;
+        else if (e.tag === 'DIV' && e.withName) label += ' de ' + e.withName;
+        return { label, dateDisplay: e.date || '', dateISO: animGedDateToISO(e.date), place: e.place || '' };
+    });
+    list.forEach((e, i) => { e._i = i; }); // conserve l'ordre d'origine pour les événements non datés
+    list.sort((a, b) => {
+        if (a.dateISO && b.dateISO) return a.dateISO < b.dateISO ? -1 : (a.dateISO > b.dateISO ? 1 : 0);
+        if (a.dateISO) return -1;
+        if (b.dateISO) return 1;
+        return a._i - b._i;
+    });
+    return list;
 }
 
 function animLoadGedFile(input) {
@@ -3633,7 +3728,8 @@ function animGedSelectIndividual(id) {
                 nom: animGedSurname(spouse.name),
                 naissance: animGedDateToISO(spouse.birt),
                 relation: 'conjoint',
-                deces: animGedDateToISO(spouse.deat)
+                deces: animGedDateToISO(spouse.deat),
+                evenements: animGedEventsForDisplay(spouse)
             });
         }
         for (const childId of fam.chil) {
@@ -3644,13 +3740,14 @@ function animGedSelectIndividual(id) {
                     nom: animGedSurname(child.name),
                     naissance: animGedDateToISO(child.birt),
                     relation: 'enfant',
-                    deces: animGedDateToISO(child.deat)
+                    deces: animGedDateToISO(child.deat),
+                    evenements: animGedEventsForDisplay(child)
                 });
             }
         }
     }
 
-    animData = { prenom: animGedGivenName(main.name), relations };
+    animData = { prenom: animGedGivenName(main.name), nom: animGedSurname(main.name), relations, evenements: animGedEventsForDisplay(main) };
     if (animPendingPortrait) animData.portrait = animPendingPortrait;
     document.getElementById('animJson').value = JSON.stringify(animData, null, 2);
     document.getElementById('animGedResults').innerHTML = '';
@@ -3829,6 +3926,7 @@ function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, figu
         <div class="anim-legs" style="width:${legW}px;height:${legH}px;font-size:${avatarPx}px"></div>
         <div class="anim-name" style="font-size:${nameSize}px">${animEsc(person.prenom || '')}</div>
     `;
+    fig.addEventListener('click', () => animPauseAndShowIndi(person));
     stage.appendChild(fig);
 }
 
@@ -3902,6 +4000,62 @@ function animLaunch() {
     });
 }
 
+// ── FICHE INDIVIDU (clic sur une silhouette pendant la marche) ───
+// Met en pause toutes les silhouettes (marche + balancement des jambes) et affiche
+// la fiche détaillée de l'individu cliqué, avec ses événements triés chronologiquement.
+function animPauseAndShowIndi(person) {
+    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-legs').forEach(el => {
+        el.style.animationPlayState = 'paused';
+    });
+    animShowIndiModal(person);
+}
+function animResumeAnimation() {
+    document.querySelectorAll('#animStage .anim-figure, #animStage .anim-legs').forEach(el => {
+        el.style.animationPlayState = 'running';
+    });
+}
+
+// Repli utilisé quand l'individu ne vient pas d'un GEDCOM (saisie JSON manuelle) :
+// on reconstitue au moins naissance/décès comme "événements" à partir des champs connus.
+function animFallbackEvents(person) {
+    const evts = [];
+    if (person.naissance) evts.push({ label: 'Naissance', dateDisplay: person.naissance, dateISO: person.naissance, place: '' });
+    if (person.deces) evts.push({ label: 'Décès', dateDisplay: person.deces, dateISO: person.deces, place: '' });
+    return evts;
+}
+
+function animShowIndiModal(person) {
+    const fullName = [person.prenom, person.nom].filter(Boolean).join(' ') || person.prenom || '(sans nom)';
+    const age = animAgeIn1809(person.naissance);
+    let html = `<div class="anim-indi-header">
+        <img src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
+        <div>
+            <div style="font-weight:700;font-size:1.05rem">${animEsc(fullName)}</div>
+            ${age != null ? `<div style="font-size:0.8rem;color:var(--text-muted)">${age} an${age > 1 ? 's' : ''} en 1809</div>` : ''}
+        </div>
+    </div>`;
+
+    const events = (person.evenements && person.evenements.length) ? person.evenements : animFallbackEvents(person);
+    if (events.length) {
+        html += events.map(e => `<div class="anim-event-item">
+            <div class="anim-event-label">${animEsc(e.label)}</div>
+            <div class="anim-event-meta">${animEsc(e.dateDisplay || 'date inconnue')}${e.place ? ' — ' + animEsc(e.place) : ''}</div>
+        </div>`).join('');
+    } else {
+        html += `<p class="anim-hint">Aucun événement disponible pour cet individu (chargez un fichier GEDCOM pour un historique complet).</p>`;
+    }
+
+    document.getElementById('animIndiModalBody').innerHTML = html;
+    document.getElementById('animIndiModal').classList.add('open');
+}
+function animCloseIndiModal() {
+    document.getElementById('animIndiModal').classList.remove('open');
+    animResumeAnimation();
+}
+document.getElementById('animIndiModal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) animCloseIndiModal();
+});
+
 // ── GARDE BOUTON RETOUR ANDROID ───────────────────────
 // Piège la touche Retour matérielle/gestuelle Android : la première
 // pression ferme une éventuelle modale ouverte ou demande confirmation
@@ -3919,7 +4073,9 @@ function animLaunch() {
 
         const openModal = document.querySelector('.modal.open, #imgModal.open');
         if (openModal) {
+            const wasIndiModal = openModal.id === 'animIndiModal';
             openModal.classList.remove('open');
+            if (wasIndiModal) animResumeAnimation(); // la touche Retour ferme la fiche : on relance la marche
             armBackGuard(); // on réarme le piège pour la prochaine pression
             return;
         }
