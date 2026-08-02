@@ -453,6 +453,15 @@
         .anim-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: var(--border); }
         .anim-chip.conjoint { border-color: var(--accent3); }
         .anim-chip.enfant { border-color: var(--accent2); }
+        #animModal details > summary { color: var(--text-muted); margin: 4px 0; }
+        #animModal details[open] > summary { margin-bottom: 10px; }
+        .anim-ged-item {
+            display: block; width: 100%; text-align: left; background: var(--bg-dark);
+            border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+            margin-bottom: 6px; color: var(--text); font-size: 0.8rem; cursor: pointer;
+        }
+        .anim-ged-item:hover { border-color: var(--accent); }
+        .anim-ged-item .sub { color: var(--text-muted); font-size: 0.72rem; }
 
         /* Scène de marche */
         #animStage {
@@ -882,9 +891,25 @@
     <div class="modal-box">
         <div class="modal-title">🚶 Animation — Population</div>
         <div class="modal-body" style="margin-bottom:8px">
-            Fait « marcher » un individu de l'arbre Geneanet, accompagné de son
-            conjoint et de ses enfants encore en vie (décès vide ou postérieur au 31/12/1809).
+            Fait « marcher » un individu, accompagné de son conjoint et de ses enfants
+            encore en vie (décès vide ou postérieur au 31/12/1809, et déjà nés à cette date).
         </div>
+
+        <label class="anim-field-label">1. Fichier GEDCOM (.ged) — recommandé</label>
+        <label class="btn btn-primary btn-full" style="text-align:center;display:block">
+            📁 Charger un fichier .ged
+            <input type="file" id="animGedInput" accept=".ged,.gedcom,text/plain" style="display:none" onchange="animLoadGedFile(this)">
+        </label>
+        <p class="anim-hint" id="animGedStatus" style="margin-top:4px"></p>
+
+        <div id="animGedSearchBlock" style="display:none;margin-top:8px">
+            <label class="anim-field-label">Rechercher l'individu (prénom, nom, année...)</label>
+            <input type="text" id="animGedSearch" class="search-input" placeholder="ex : Henri Ract 1756" oninput="animGedDoSearch()">
+            <div id="animGedResults" style="max-height:160px;overflow-y:auto;margin-top:6px"></div>
+        </div>
+
+        <details style="margin-top:14px">
+        <summary class="anim-field-label" style="cursor:pointer;display:inline-block">2. Ou saisie manuelle (Geneanet / JSON)</summary>
 
         <label class="anim-field-label">Identifiant Geneanet de l'individu</label>
         <input type="text" id="animId" class="search-input" placeholder="ex : i=12345 ou p=jean&n=dupont">
@@ -917,9 +942,11 @@
         <textarea id="animJson" placeholder='{"prenom":"Jean","portrait":"https://...jpg","relations":[{"prenom":"Marie","portrait":"https://...jpg","relation":"conjoint","deces":""},{"prenom":"Paul","portrait":"https://...jpg","relation":"enfant","deces":"1830-05-02"}]}'></textarea>
 
         <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn btn-primary" style="flex:1" onclick="animParseAndLoad()">📥 Charger</button>
-            <button class="btn btn-success" style="flex:1" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
+            <button class="btn btn-primary" style="flex:1" onclick="animParseAndLoad()">📥 Charger le JSON</button>
         </div>
+        </details>
+
+        <button class="btn btn-success btn-full" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
 
         <div id="animPreview"></div>
         <div id="animStage"></div>
@@ -3426,6 +3453,178 @@ function animClearPortrait() {
     document.getElementById('animPortraitPreviewImg').style.display = 'none';
     document.getElementById('animPortraitClearBtn').style.display = 'none';
     if (animData) { delete animData.portrait; animRenderPreview(); }
+}
+
+// ── IMPORT GEDCOM (.ged) ──────────────────────────────
+// Parseur GEDCOM minimal, entièrement local (aucun envoi réseau) : extrait les
+// individus (nom, sexe, naissance, décès, familles) et les familles (parents,
+// enfants), afin de retrouver un individu et calculer qui, parmi ses proches,
+// était encore en vie au 31/12/1809 — sans jamais avoir à saisir de JSON à la main.
+const ANIM_GED_MONTHS = { JAN:'01', FEB:'02', MAR:'03', APR:'04', MAY:'05', JUN:'06', JUL:'07', AUG:'08', SEP:'09', OCT:'10', NOV:'11', DEC:'12' };
+let animGed = null; // { individuals: Map(id -> {...}), families: Map(id -> {...}) }
+
+// Convertit une date GEDCOM ("16 MAY 1756", "ABT 1830", "1756"...) en "YYYY-MM-DD" (ou '' si illisible)
+function animGedDateToISO(raw) {
+    if (!raw) return '';
+    const s = raw.trim().toUpperCase();
+    if (s.startsWith('@#D')) return ''; // calendrier non-grégorien (républicain, hébraïque...) : non géré
+    let m = s.match(/(\d{1,2})\s+([A-Z]{3})\s+(\d{3,4})/);
+    if (m && ANIM_GED_MONTHS[m[2]]) return `${m[3]}-${ANIM_GED_MONTHS[m[2]]}-${String(m[1]).padStart(2, '0')}`;
+    m = s.match(/([A-Z]{3})\s+(\d{3,4})/);
+    if (m && ANIM_GED_MONTHS[m[1]]) return `${m[2]}-${ANIM_GED_MONTHS[m[1]]}-01`;
+    m = s.match(/(\d{3,4})/);
+    if (m) return `${m[1]}-01-01`;
+    return '';
+}
+function animGedGivenName(name) {
+    return (name || '').split('/')[0].trim() || (name || '').trim();
+}
+
+function animParseGedcom(text) {
+    const individuals = new Map();
+    const families = new Map();
+    let curIndi = null, curFam = null, context = null;
+    const lines = text.split(/\r\n|\r|\n/);
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        const m = line.match(/^(\d+)\s+(.*)$/);
+        if (!m) continue;
+        const level = parseInt(m[1], 10);
+        let remainder = m[2];
+
+        if (remainder.startsWith('@')) {
+            const parts = remainder.split(/\s+/);
+            const xref = parts[0].replace(/@/g, '');
+            const tag = parts[1];
+            if (tag === 'INDI') {
+                curIndi = xref; curFam = null; context = null;
+                individuals.set(curIndi, { id: curIndi, name: '', sex: '', birt: '', deat: '', famc: [], fams: [] });
+            } else if (tag === 'FAM') {
+                curFam = xref; curIndi = null; context = null;
+                families.set(curFam, { id: curFam, husb: '', wife: '', chil: [] });
+            }
+            continue;
+        }
+
+        const sp = remainder.indexOf(' ');
+        const tag = sp === -1 ? remainder : remainder.slice(0, sp);
+        const value = sp === -1 ? '' : remainder.slice(sp + 1).trim();
+
+        if (curIndi && level === 1) {
+            context = tag;
+            const p = individuals.get(curIndi);
+            if (tag === 'NAME') p.name = value;
+            else if (tag === 'SEX') p.sex = value;
+            else if (tag === 'FAMC') p.famc.push(value.replace(/@/g, ''));
+            else if (tag === 'FAMS') p.fams.push(value.replace(/@/g, ''));
+        } else if (curIndi && level === 2 && tag === 'DATE') {
+            const p = individuals.get(curIndi);
+            if ((context === 'BIRT' || context === 'CHR') && !p.birt) p.birt = value;
+            else if (context === 'DEAT') p.deat = value;
+        }
+        if (curFam && level === 1) {
+            const f = families.get(curFam);
+            if (tag === 'HUSB') f.husb = value.replace(/@/g, '');
+            else if (tag === 'WIFE') f.wife = value.replace(/@/g, '');
+            else if (tag === 'CHIL') f.chil.push(value.replace(/@/g, ''));
+        }
+    }
+    return { individuals, families };
+}
+
+function animLoadGedFile(input) {
+    const file = input.files[0]; if (!file) return;
+    document.getElementById('animGedStatus').textContent = 'Lecture du fichier…';
+    const reader = new FileReader();
+    reader.onload = e => {
+        try {
+            animGed = animParseGedcom(e.target.result);
+            document.getElementById('animGedStatus').textContent =
+                `✅ ${animGed.individuals.size} individus chargés depuis « ${file.name} » (traitement 100% local, rien n'est envoyé).`;
+            document.getElementById('animGedSearchBlock').style.display = 'block';
+            document.getElementById('animGedSearch').focus();
+        } catch (err) {
+            document.getElementById('animGedStatus').textContent = '❌ Fichier illisible : ' + err.message;
+        }
+    };
+    reader.onerror = () => { document.getElementById('animGedStatus').textContent = '❌ Impossible de lire ce fichier.'; };
+    reader.readAsText(file, 'UTF-8');
+}
+
+function animGedDoSearch() {
+    const q = (document.getElementById('animGedSearch').value || '').trim().toLowerCase();
+    const results = document.getElementById('animGedResults');
+    results.innerHTML = '';
+    if (!animGed || q.length < 2) return;
+    const terms = q.split(/\s+/);
+    let count = 0;
+    for (const p of animGed.individuals.values()) {
+        const hay = (p.name.replace(/\//g, ' ') + ' ' + p.birt).toLowerCase();
+        if (!terms.every(t => hay.includes(t))) continue;
+        count++;
+        if (count > 30) break; // on limite l'affichage pour rester réactif
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'anim-ged-item';
+        btn.onclick = () => animGedSelectIndividual(p.id);
+        btn.innerHTML = `${animEsc(p.name.replace(/\//g, ' ').trim())}
+            <div class="sub">né(e) ${animEsc(p.birt || '?')} — décédé(e) ${animEsc(p.deat || '(inconnu)')}</div>`;
+        results.appendChild(btn);
+    }
+    if (count === 0) results.innerHTML = '<p class="anim-hint">Aucun résultat.</p>';
+}
+
+// Vivant au 31/12/1809 : né à cette date ou avant (ou naissance inconnue), et pas mort avant
+function animGedAliveAtCutoff(p) {
+    const cutoffISO = '1809-12-31';
+    const birt = animGedDateToISO(p.birt);
+    const deat = animGedDateToISO(p.deat);
+    if (birt && birt > cutoffISO) return false; // pas encore né
+    if (deat && deat <= cutoffISO) return false; // déjà décédé
+    return true;
+}
+
+function animGedSelectIndividual(id) {
+    const { individuals, families } = animGed;
+    const main = individuals.get(id);
+    if (!main) return;
+
+    const relations = [];
+    for (const famId of main.fams) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        const spouseId = (fam.husb === id) ? fam.wife : fam.husb;
+        const spouse = spouseId ? individuals.get(spouseId) : null;
+        if (spouse && animGedAliveAtCutoff(spouse)) {
+            relations.push({
+                prenom: animGedGivenName(spouse.name),
+                relation: 'conjoint',
+                deces: animGedDateToISO(spouse.deat)
+            });
+        }
+        for (const childId of fam.chil) {
+            const child = individuals.get(childId);
+            if (child && animGedAliveAtCutoff(child)) {
+                relations.push({
+                    prenom: animGedGivenName(child.name),
+                    relation: 'enfant',
+                    deces: animGedDateToISO(child.deat)
+                });
+            }
+        }
+    }
+
+    animData = { prenom: animGedGivenName(main.name), relations };
+    if (animPendingPortrait) animData.portrait = animPendingPortrait;
+    document.getElementById('animJson').value = JSON.stringify(animData, null, 2);
+    document.getElementById('animGedResults').innerHTML = '';
+    document.getElementById('animGedSearch').value = animGedGivenName(main.name) + ' ' + main.name.replace(/\//g, ' ').trim();
+    document.getElementById('animStage').classList.remove('show');
+    document.getElementById('animStage').innerHTML = '';
+    document.getElementById('animLaunchBtn').disabled = false;
+    animRenderPreview();
+    toast(`${relations.length} proche(s) encore en vie en 1809 trouvé(s) pour ${animGedGivenName(main.name)}.`);
 }
 
 // Ouvre la fiche Geneanet de l'individu (même base que "Rechercher dans l'arbre")
