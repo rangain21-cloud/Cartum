@@ -453,6 +453,20 @@
         .anim-chip img { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: var(--border); }
         .anim-chip.conjoint { border-color: var(--accent3); }
         .anim-chip.enfant { border-color: var(--accent2); }
+        .anim-rel-row {
+            display: flex; align-items: center; gap: 8px;
+            background: var(--bg-dark); border: 1px solid var(--border);
+            border-radius: 10px; padding: 6px 8px; margin-bottom: 6px;
+        }
+        .anim-rel-row .anim-avatar { width: 36px; height: 36px; flex-shrink: 0; }
+        .anim-rel-row .anim-rel-name { flex: 1; font-size: 0.8rem; min-width: 0; }
+        .anim-rel-row .anim-rel-tag { font-size: 0.65rem; color: var(--text-muted); }
+        .anim-rel-row .anim-photo-btn {
+            flex-shrink: 0; width: 34px; height: 34px; padding: 0; margin: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 1rem;
+        }
+        .anim-rel-row .anim-avatar.conjoint { border-color: var(--accent3); }
+        .anim-rel-row .anim-avatar.enfant { border-color: var(--accent2); }
         #animModal details > summary { color: var(--text-muted); margin: 4px 0; }
         #animModal details[open] > summary { margin-bottom: 10px; }
         .anim-ged-item {
@@ -3705,33 +3719,68 @@ function animParseAndLoad() {
     animRenderPreview();
 }
 
+function animRelRowHtml(r, idx, cssClass, tagLabel) {
+    return `<div class="anim-rel-row">
+        <img id="animRelAvatar_${idx}" class="anim-avatar ${cssClass}" src="${animEsc(r.portrait || '')}" onerror="this.style.opacity=0.3">
+        <div class="anim-rel-name">
+            ${animEsc(r.prenom)}
+            <div class="anim-rel-tag">${tagLabel}</div>
+        </div>
+        <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(r.prenom)}">
+            📷
+            <input type="file" accept="image/*" style="display:none" onchange="animSetRelationPhoto(${idx}, this)">
+        </label>
+    </div>`;
+}
+
 function animRenderPreview() {
     if (!animData) return;
-    const spouses  = animData.relations.filter(r => r.relation === 'conjoint' && animIsAlive(r.deces));
-    const children = animData.relations.filter(r => r.relation === 'enfant'   && animIsAlive(r.deces));
+    // On garde l'index d'origine dans animData.relations pour pouvoir y associer une photo
+    const spouses = [], children = [];
+    animData.relations.forEach((r, idx) => {
+        if (!animIsAlive(r.deces)) return;
+        if (r.relation === 'conjoint') spouses.push({ ...r, idx });
+        else if (r.relation === 'enfant') children.push({ ...r, idx });
+    });
 
     let html = `<div class="anim-person-preview">
         <img class="anim-avatar" src="${animEsc(animData.portrait || '')}" onerror="this.style.opacity=0.3">
         <div>
             <div style="font-weight:700">${animEsc(animData.prenom)}</div>
-            <div style="font-size:0.72rem;color:var(--text-muted)">Individu principal</div>
+            <div style="font-size:0.72rem;color:var(--text-muted)">Individu principal — photo tout en haut du formulaire</div>
         </div>
     </div>`;
 
     if (spouses.length) {
-        html += `<span class="anim-field-label">Conjoint(e) en vie</span><div class="anim-chip-row">` +
-            spouses.map(s => `<span class="anim-chip conjoint"><img src="${animEsc(s.portrait || '')}" onerror="this.style.opacity=0.3">${animEsc(s.prenom)}</span>`).join('') +
-            `</div>`;
+        html += `<span class="anim-field-label">Conjoint(e) en vie</span>` +
+            spouses.map(s => animRelRowHtml(s, s.idx, 'conjoint', 'Conjoint(e)')).join('');
     }
     if (children.length) {
-        html += `<span class="anim-field-label">Enfants en vie</span><div class="anim-chip-row">` +
-            children.map(c => `<span class="anim-chip enfant"><img src="${animEsc(c.portrait || '')}" onerror="this.style.opacity=0.3">${animEsc(c.prenom)}</span>`).join('') +
-            `</div>`;
+        html += `<span class="anim-field-label">Enfants en vie</span>` +
+            children.map(c => animRelRowHtml(c, c.idx, 'enfant', 'Enfant')).join('');
     }
     if (!spouses.length && !children.length) {
         html += `<p class="anim-hint">Aucun proche encore en vie (décès vide ou postérieur au 31/12/1809) dans les données fournies.</p>`;
     }
     document.getElementById('animPreview').innerHTML = html;
+}
+
+// Associe une photo (choisie par l'utilisateur) à un proche précis, par son index
+// dans animData.relations ; stockée directement en base64 dans les données chargées.
+function animSetRelationPhoto(idx, input) {
+    const file = input.files[0]; if (!file) return;
+    if (!animData || !animData.relations[idx]) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        animData.relations[idx].portrait = e.target.result; // data URL base64
+        const img = document.getElementById('animRelAvatar_' + idx);
+        if (img) { img.src = e.target.result; img.style.opacity = 1; }
+        // Si le JSON est affiché, on le garde synchronisé avec la photo ajoutée
+        const ta = document.getElementById('animJson');
+        if (ta && ta.value.trim()) ta.value = JSON.stringify(animData, null, 2);
+    };
+    reader.onerror = () => toast('Impossible de lire cette image.');
+    reader.readAsDataURL(file);
 }
 
 // Ajoute une silhouette animée sur la scène ; delay/duration en secondes
