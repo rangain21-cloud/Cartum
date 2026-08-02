@@ -459,9 +459,9 @@
             border-radius: 10px; padding: 6px 8px; margin-bottom: 6px;
         }
         .anim-rel-row .anim-avatar { width: 36px; height: 36px; flex-shrink: 0; }
-        .anim-rel-row .anim-rel-name { flex: 1; font-size: 0.8rem; min-width: 0; }
-        .anim-rel-row .anim-rel-tag { font-size: 0.65rem; color: var(--text-muted); }
-        .anim-rel-row .anim-photo-btn {
+        .anim-rel-name { flex: 1; font-size: 0.8rem; min-width: 0; }
+        .anim-rel-tag { font-size: 0.65rem; color: var(--text-muted); }
+        .anim-photo-btn {
             flex-shrink: 0; width: 34px; height: 34px; padding: 0; margin: 0;
             display: flex; align-items: center; justify-content: center; font-size: 1rem;
         }
@@ -479,34 +479,34 @@
 
         /* Scène de marche */
         #animStage {
-            position: relative; width: 100%; height: 260px;
+            position: relative; width: 100%; height: 360px;
             background: linear-gradient(#1c2635, var(--bg-dark));
             border-radius: 10px; overflow: hidden; margin-top: 12px;
             border: 1px solid var(--border); display: none;
         }
         #animStage.show { display: block; }
         .anim-figure {
-            position: absolute; top: -60px; display: flex; flex-direction: column; align-items: center;
+            position: absolute; top: -90px; display: flex; flex-direction: column; align-items: center;
             animation-name: anim-walk-down; animation-timing-function: linear;
             animation-fill-mode: forwards;
         }
-        .anim-figure .anim-avatar { width: 30px; height: 30px; border-width: 1.5px; }
+        .anim-figure .anim-avatar { width: 52px; height: 52px; border-width: 2.5px; }
         .anim-figure .anim-name {
-            font-size: 0.6rem; color: var(--text); margin-top: 2px;
-            text-shadow: 0 1px 2px #000; white-space: nowrap;
+            font-size: 0.82rem; font-weight: 600; color: var(--text); margin-top: 3px;
+            text-shadow: 0 1px 3px #000; white-space: nowrap;
         }
         .anim-figure .anim-legs {
-            width: 14px; height: 10px; margin-top: 1px;
-            border-left: 2px solid var(--text-muted); border-right: 2px solid var(--text-muted);
+            width: 22px; height: 16px; margin-top: 2px;
+            border-left: 3px solid var(--text-muted); border-right: 3px solid var(--text-muted);
             animation: anim-legs-swing 0.45s ease-in-out infinite;
         }
         @keyframes anim-walk-down {
             from { transform: translateY(0); }
-            to   { transform: translateY(300px); }
+            to   { transform: translateY(420px); }
         }
         @keyframes anim-legs-swing {
-            0%, 100% { border-left-width: 4px; border-right-width: 1px; }
-            50%      { border-left-width: 1px; border-right-width: 4px; }
+            0%, 100% { border-left-width: 6px; border-right-width: 2px; }
+            50%      { border-left-width: 2px; border-right-width: 6px; }
         }
 
         /* ─── IMAGE MODAL ─────────────────────────── */
@@ -953,7 +953,8 @@
         </p>
 
         <label class="anim-field-label">Données (JSON)</label>
-        <textarea id="animJson" placeholder='{"prenom":"Jean","portrait":"https://...jpg","relations":[{"prenom":"Marie","portrait":"https://...jpg","relation":"conjoint","deces":""},{"prenom":"Paul","portrait":"https://...jpg","relation":"enfant","deces":"1830-05-02"}]}'></textarea>
+        <textarea id="animJson" placeholder='{"prenom":"Jean","portrait":"https://...jpg","relations":[{"prenom":"Marie","nom":"Dupont","naissance":"1780-04-12","portrait":"https://...jpg","relation":"conjoint","deces":""},{"prenom":"Paul","nom":"Dupont","naissance":"1802-11-03","portrait":"https://...jpg","relation":"enfant","deces":"1830-05-02"}]}'></textarea>
+        <p class="anim-hint" style="margin-top:4px">Champs optionnels par proche : "nom" et "naissance" (année suffit) permettent d'afficher nom + âge en 1809.</p>
 
         <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn btn-primary" style="flex:1" onclick="animParseAndLoad()">📥 Charger le JSON</button>
@@ -3438,6 +3439,16 @@ function animIsAlive(deces) {
     return d > ANIM_DEATH_CUTOFF;
 }
 
+// Âge en 1809 (à partir de la seule année de naissance, suffisant pour un âge approximatif)
+function animAgeIn1809(naissance) {
+    if (!naissance) return null;
+    const m = String(naissance).match(/(\d{4})/);
+    if (!m) return null;
+    const birthYear = parseInt(m[1], 10);
+    if (birthYear > 1809) return null; // pas encore né en 1809
+    return 1809 - birthYear;
+}
+
 function openAnimModal() {
     document.getElementById('animModal').classList.add('open');
 }
@@ -3492,6 +3503,10 @@ function animGedDateToISO(raw) {
 }
 function animGedGivenName(name) {
     return (name || '').split('/')[0].trim() || (name || '').trim();
+}
+function animGedSurname(name) {
+    const parts = (name || '').split('/');
+    return (parts[1] || '').trim();
 }
 
 function animParseGedcom(text) {
@@ -3613,6 +3628,8 @@ function animGedSelectIndividual(id) {
         if (spouse && animGedAliveAtCutoff(spouse)) {
             relations.push({
                 prenom: animGedGivenName(spouse.name),
+                nom: animGedSurname(spouse.name),
+                naissance: animGedDateToISO(spouse.birt),
                 relation: 'conjoint',
                 deces: animGedDateToISO(spouse.deat)
             });
@@ -3622,6 +3639,8 @@ function animGedSelectIndividual(id) {
             if (child && animGedAliveAtCutoff(child)) {
                 relations.push({
                     prenom: animGedGivenName(child.name),
+                    nom: animGedSurname(child.name),
+                    naissance: animGedDateToISO(child.birt),
                     relation: 'enfant',
                     deces: animGedDateToISO(child.deat)
                 });
@@ -3656,9 +3675,9 @@ function animLoadExample() {
         prenom: "Jean",
         portrait: "https://placehold.co/100x100?text=Jean",
         relations: [
-            { prenom: "Marie",  portrait: "https://placehold.co/100x100?text=Marie",  relation: "conjoint", deces: "" },
-            { prenom: "Paul",   portrait: "https://placehold.co/100x100?text=Paul",   relation: "enfant",   deces: "1830-05-02" },
-            { prenom: "Louise", portrait: "https://placehold.co/100x100?text=Louise", relation: "enfant",   deces: "1795-01-10" }
+            { prenom: "Marie",  nom: "Dupont", naissance: "1780-04-12", portrait: "https://placehold.co/100x100?text=Marie",  relation: "conjoint", deces: "" },
+            { prenom: "Paul",   nom: "Dupont", naissance: "1802-11-03", portrait: "https://placehold.co/100x100?text=Paul",   relation: "enfant",   deces: "1830-05-02" },
+            { prenom: "Louise", nom: "Dupont", naissance: "1805-06-20", portrait: "https://placehold.co/100x100?text=Louise", relation: "enfant",   deces: "1795-01-10" }
         ]
     };
     document.getElementById('animJson').value = JSON.stringify(example, null, 2);
@@ -3720,10 +3739,13 @@ function animParseAndLoad() {
 }
 
 function animRelRowHtml(r, idx, cssClass, tagLabel) {
+    const age = animAgeIn1809(r.naissance);
+    const fullName = [r.prenom, r.nom].filter(Boolean).join(' ');
+    const ageTxt = age != null ? `, ${age} an${age > 1 ? 's' : ''} en 1809` : '';
     return `<div class="anim-rel-row">
         <img id="animRelAvatar_${idx}" class="anim-avatar ${cssClass}" src="${animEsc(r.portrait || '')}" onerror="this.style.opacity=0.3">
         <div class="anim-rel-name">
-            ${animEsc(r.prenom)}
+            ${animEsc(fullName)}${animEsc(ageTxt)}
             <div class="anim-rel-tag">${tagLabel}</div>
         </div>
         <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(r.prenom)}">
@@ -3745,10 +3767,14 @@ function animRenderPreview() {
 
     let html = `<div class="anim-person-preview">
         <img class="anim-avatar" src="${animEsc(animData.portrait || '')}" onerror="this.style.opacity=0.3">
-        <div>
-            <div style="font-weight:700">${animEsc(animData.prenom)}</div>
-            <div style="font-size:0.72rem;color:var(--text-muted)">Individu principal — photo tout en haut du formulaire</div>
+        <div class="anim-rel-name">
+            ${animEsc(animData.prenom)}
+            <div class="anim-rel-tag">Individu principal</div>
         </div>
+        <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(animData.prenom)}">
+            📷
+            <input type="file" accept="image/*" style="display:none" onchange="animPreviewPortrait(this)">
+        </label>
     </div>`;
 
     if (spouses.length) {
@@ -3818,7 +3844,7 @@ function animLaunch() {
     }
 
     const stageWidth = stage.clientWidth || 300;
-    const centerX = stageWidth / 2 - 15;
+    const centerX = stageWidth / 2 - 26;
 
     // Individu principal : marche de haut en bas, au centre
     animAddFigure(stage, animData, centerX, 0, 6);
@@ -3826,12 +3852,12 @@ function animLaunch() {
     // Conjoint(e)s : à ses côtés, au même rythme
     spouses.forEach((s, i) => {
         const side = (i % 2 === 0) ? 1 : -1;
-        const offset = side * 34 * (Math.floor(i / 2) + 1);
+        const offset = side * 60 * (Math.floor(i / 2) + 1);
         animAddFigure(stage, s, centerX + offset, 0, 6);
     });
 
     // Enfants : derrière lui (léger retard de départ), en ligne
-    const spacing = 30;
+    const spacing = 52;
     const startX = centerX - ((children.length - 1) * spacing) / 2;
     children.forEach((c, i) => {
         animAddFigure(stage, c, startX + i * spacing, 0.5, 6.5);
