@@ -985,7 +985,7 @@
         </div>
         </details>
 
-        <label class="anim-field-label">3. Fond de carte (optionnel)</label>
+        <label class="anim-field-label">3. Fond de scène (optionnel)</label>
         <div style="display:flex;gap:8px">
             <input type="text" id="animMapProprio" class="search-input" style="flex:1" placeholder="IdProprio" list="animProprioList" oninput="animMapProprioChanged()">
             <input type="text" id="animMapLot" class="search-input" style="flex:1" placeholder="IdLot" list="animMapLotList">
@@ -993,6 +993,16 @@
         <datalist id="animProprioList"></datalist>
         <datalist id="animMapLotList"></datalist>
         <p class="anim-hint" style="margin-top:4px">Si renseigné, la carte s'affichera en fond de la scène, recentrée et surlignée sur ce lot.</p>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+            <img id="animBgImgPreview" style="display:none;width:40px;height:40px;border-radius:6px;object-fit:cover;border:2px solid var(--accent)">
+            <label class="btn btn-muted btn-sm" style="flex:1;text-align:center;margin:0">
+                🖼 Choisir une image (à la place de la carte)
+                <input type="file" id="animBgImgInput" accept="image/*" style="display:none" onchange="animSetBgImage(this)">
+            </label>
+            <button class="btn btn-muted btn-sm" id="animBgImgClearBtn" style="display:none" onclick="animClearBgImage()">✕</button>
+        </div>
+        <p class="anim-hint" style="margin-top:4px">Une image choisie ici remplace la carte comme fond de la scène.</p>
 
         <button class="btn btn-success btn-full" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
 
@@ -3528,6 +3538,28 @@ function animMapProprioChanged() {
         [...new Set(lots.filter(Boolean))].sort().map(l => `<option value="${animEsc(l)}">`).join('');
 }
 
+// Image personnelle choisie comme fond de scène, à la place de la carte
+let animBgImage = null;
+function animSetBgImage(input) {
+    const file = input.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+        animBgImage = e.target.result; // data URL
+        const img = document.getElementById('animBgImgPreview');
+        img.src = animBgImage;
+        img.style.display = 'block';
+        document.getElementById('animBgImgClearBtn').style.display = 'inline-block';
+    };
+    reader.onerror = () => toast('Impossible de lire cette image.');
+    reader.readAsDataURL(file);
+}
+function animClearBgImage() {
+    animBgImage = null;
+    document.getElementById('animBgImgInput').value = '';
+    document.getElementById('animBgImgPreview').style.display = 'none';
+    document.getElementById('animBgImgClearBtn').style.display = 'none';
+}
+
 // Portrait de l'individu principal chargé via fichier (évite de coller du base64 dans le JSON)
 let animPendingPortrait = null;
 function animPreviewPortrait(input) {
@@ -4067,16 +4099,24 @@ function animLaunch() {
     stage.innerHTML = '';
     stage.classList.add('show');
 
-    // Fond de carte (facultatif) : ajouté en premier pour rester derrière les personnages
-    const chosenLot = (document.getElementById('animMapLot').value || '').trim();
-    const mapHtml = chosenLot ? animBuildMapBackgroundHtml(chosenLot) : null;
-    if (mapHtml) {
+    // Fond de scène (facultatif) : ajouté en premier pour rester derrière les personnages.
+    // Une image personnelle choisie par l'utilisateur prime sur la carte.
+    if (animBgImage) {
         const bg = document.createElement('div');
         bg.className = 'anim-map-bg';
-        bg.innerHTML = mapHtml;
+        bg.innerHTML = `<img src="${animEsc(animBgImage)}" style="width:100%;height:100%;object-fit:cover;display:block">`;
         stage.appendChild(bg);
-    } else if (chosenLot) {
-        toast(`Lot ${chosenLot} introuvable sur la carte chargée — animation lancée sans fond de carte.`);
+    } else {
+        const chosenLot = (document.getElementById('animMapLot').value || '').trim();
+        const mapHtml = chosenLot ? animBuildMapBackgroundHtml(chosenLot) : null;
+        if (mapHtml) {
+            const bg = document.createElement('div');
+            bg.className = 'anim-map-bg';
+            bg.innerHTML = mapHtml;
+            stage.appendChild(bg);
+        } else if (chosenLot) {
+            toast(`Lot ${chosenLot} introuvable sur la carte chargée — animation lancée sans fond de carte.`);
+        }
     }
 
     const spouses  = animData.relations.filter(r => r.relation === 'conjoint' && animIsAlive(r.deces));
