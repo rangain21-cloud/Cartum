@@ -507,6 +507,10 @@
             border: 1px solid var(--border); display: none;
         }
         #animStage.show { display: block; }
+        .anim-map-bg {
+            position: absolute; inset: 0; z-index: 0; opacity: 0.6; pointer-events: none;
+        }
+        .anim-map-bg svg { width: 100%; height: 100%; display: block; }
         .anim-figure {
             position: absolute; display: flex; flex-direction: column; align-items: center;
             animation-name: anim-walk-down; animation-timing-function: linear;
@@ -980,6 +984,15 @@
             <button class="btn btn-primary" style="flex:1" onclick="animParseAndLoad()">📥 Charger le JSON</button>
         </div>
         </details>
+
+        <label class="anim-field-label">3. Fond de carte (optionnel)</label>
+        <div style="display:flex;gap:8px">
+            <input type="text" id="animMapProprio" class="search-input" style="flex:1" placeholder="IdProprio" list="animProprioList" oninput="animMapProprioChanged()">
+            <input type="text" id="animMapLot" class="search-input" style="flex:1" placeholder="IdLot" list="animMapLotList">
+        </div>
+        <datalist id="animProprioList"></datalist>
+        <datalist id="animMapLotList"></datalist>
+        <p class="anim-hint" style="margin-top:4px">Si renseigné, la carte s'affichera en fond de la scène, recentrée et surlignée sur ce lot.</p>
 
         <button class="btn btn-success btn-full" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
 
@@ -3482,9 +3495,37 @@ function animAgeIn1809(naissance) {
 
 function openAnimModal() {
     document.getElementById('animModal').classList.add('open');
+    animMapPopulateDatalists();
+    // Préremplit avec le lot actuellement sélectionné sur la carte, s'il y en a un
+    if (currentIdLot && csvData) {
+        const row = csvData.find(r => String(r.IdLot) === String(currentIdLot));
+        if (row) {
+            document.getElementById('animMapProprio').value = row.IdProprio || '';
+            document.getElementById('animMapLot').value = row.IdLot || '';
+            animMapProprioChanged();
+        }
+    }
 }
 function closeAnimModal() {
     document.getElementById('animModal').classList.remove('open');
+}
+
+// Remplit les suggestions IdProprio (tous) et IdLot (filtrés par le propriétaire choisi)
+function animMapPopulateDatalists() {
+    if (!csvData) return;
+    const proprios = [...new Set(csvData.map(r => r.IdProprio).filter(Boolean))].sort();
+    document.getElementById('animProprioList').innerHTML =
+        proprios.map(p => `<option value="${animEsc(p)}">`).join('');
+    animMapProprioChanged();
+}
+function animMapProprioChanged() {
+    if (!csvData) return;
+    const proprio = (document.getElementById('animMapProprio').value || '').trim();
+    const lots = proprio
+        ? csvData.filter(r => String(r.IdProprio) === proprio).map(r => r.IdLot)
+        : csvData.map(r => r.IdLot);
+    document.getElementById('animMapLotList').innerHTML =
+        [...new Set(lots.filter(Boolean))].sort().map(l => `<option value="${animEsc(l)}">`).join('');
 }
 
 // Portrait de l'individu principal chargé via fichier (évite de coller du base64 dans le JSON)
@@ -3981,11 +4022,62 @@ function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, walk
 // jeunes sont plus en retard, donc plus loin derrière).
 // Point d'accroche pour l'app externe "Banana Animation" si elle est connectée un jour :
 // window.BananaAnimation?.walk(...) prendrait ici le relais de la marche maison ci-dessous.
+// ── FOND DE CARTE (IdProprio / IdLot choisis) POUR L'ANIMATION ───
+// Reconstruit une copie de la carte SVG chargée dans l'appli (jamais la carte affichée
+// à l'écran elle-même), recentrée et surlignée sur le lot choisi, pour servir de fond
+// à la scène de marche. Purement local : aucune donnée n'est envoyée où que ce soit.
+function animFindLotElement(idLot) {
+    if (!idLot || !currentSvg || !Array.isArray(allSvgElements)) return null;
+    return allSvgElements.find(el => el._csvData && String(el._csvData.IdLot) === String(idLot)) || null;
+}
+function animBuildMapBackgroundHtml(idLot) {
+    if (!svgData || !currentSvg) return null;
+    const container = document.createElement('div');
+    container.innerHTML = svgData;
+    const svgClone = container.querySelector('svg');
+    if (!svgClone) return null;
+    svgClone.style.width = '100%';
+    svgClone.style.height = '100%';
+    svgClone.style.display = 'block';
+
+    const lotEl = animFindLotElement(idLot);
+    if (lotEl) {
+        const label = lotEl.getAttribute('inkscape:label');
+        const cloneTarget = label ? svgClone.querySelector(`[inkscape\\:label="${CSS.escape(label)}"]`) : null;
+        if (cloneTarget) {
+            cloneTarget.style.fill = '#ffd54a';
+            cloneTarget.style.stroke = '#ffffff';
+            cloneTarget.style.strokeWidth = '4';
+        }
+        // Recentre/zoome la vue sur ce lot (mêmes coordonnées géométriques que la carte source)
+        try {
+            const bbox = lotEl.getBBox();
+            const pad = Math.max(bbox.width, bbox.height) * 2.2 || 200;
+            const vx = bbox.x + bbox.width / 2 - pad / 2;
+            const vy = bbox.y + bbox.height / 2 - pad / 2;
+            svgClone.setAttribute('viewBox', `${vx} ${vy} ${pad} ${pad}`);
+        } catch (e) { /* getBBox indisponible : on garde la vue complète de la carte */ }
+    }
+    return container.innerHTML;
+}
+
 function animLaunch() {
     if (!animData) { toast("Chargez d'abord les données de l'individu"); return; }
     const stage = document.getElementById('animStage');
     stage.innerHTML = '';
     stage.classList.add('show');
+
+    // Fond de carte (facultatif) : ajouté en premier pour rester derrière les personnages
+    const chosenLot = (document.getElementById('animMapLot').value || '').trim();
+    const mapHtml = chosenLot ? animBuildMapBackgroundHtml(chosenLot) : null;
+    if (mapHtml) {
+        const bg = document.createElement('div');
+        bg.className = 'anim-map-bg';
+        bg.innerHTML = mapHtml;
+        stage.appendChild(bg);
+    } else if (chosenLot) {
+        toast(`Lot ${chosenLot} introuvable sur la carte chargée — animation lancée sans fond de carte.`);
+    }
 
     const spouses  = animData.relations.filter(r => r.relation === 'conjoint' && animIsAlive(r.deces));
     const children = animData.relations.filter(r => r.relation === 'enfant'   && animIsAlive(r.deces));
