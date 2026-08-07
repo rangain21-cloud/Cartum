@@ -3850,7 +3850,9 @@ function animGedSelectIndividual(id) {
     if (animPendingPortrait) animData.portrait = animPendingPortrait;
     document.getElementById('animJson').value = JSON.stringify(animData, null, 2);
     document.getElementById('animGedResults').innerHTML = '';
-    document.getElementById('animGedSearch').value = animGedGivenName(main.name) + ' ' + main.name.replace(/\//g, ' ').trim();
+    const birthYearMatch = String(main.birt || '').match(/\d{4}/);
+    const displayName = main.name.replace(/\//g, ' ').trim();
+    document.getElementById('animGedSearch').value = birthYearMatch ? `${displayName} - ${birthYearMatch[0]}` : displayName;
     document.getElementById('animStage').classList.remove('show');
     document.getElementById('animStage').innerHTML = '';
     document.getElementById('animLaunchBtn').disabled = false;
