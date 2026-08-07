@@ -377,6 +377,8 @@
         .btn-danger { background: var(--danger); color: #fff; }
         .btn-muted { background: var(--bg-panel); color: var(--text-muted); border: 1px solid var(--border); }
         .btn-purple { background: var(--accent4); color: #fff; }
+        .btn-parme { background: #cba7de; color: #2b1a35; }
+        .btn-parme:hover { background: #bb90d1; }
         .btn-sm { padding: 7px 10px; font-size: 0.78rem; }
         .btn-full { width: 100%; justify-content: center; }
         .btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
@@ -426,7 +428,20 @@
             max-width: 96vw; max-height: 90vh; overflow: auto;
             min-width: 280px; min-height: 220px;
             resize: both;
+            position: relative;
         }
+        /* Fond (carte ou image choisie) étendu à toute la modale, derrière tout son contenu */
+        .anim-map-bg-modal {
+            position: absolute; inset: -20px; z-index: 0; overflow: hidden;
+            border-radius: 16px; pointer-events: none;
+        }
+        .anim-map-bg-modal::after {
+            content: ''; position: absolute; inset: 0; background: rgba(15,20,30,.72);
+        }
+        .anim-map-bg-modal svg, .anim-map-bg-modal img {
+            width: 100%; height: 100%; object-fit: cover; display: block;
+        }
+        #animModal .modal-box > *:not(.anim-map-bg-modal) { position: relative; z-index: 1; }
         #animIndiModal .modal-box {
             max-width: 420px; max-height: 85vh; overflow-y: auto;
         }
@@ -860,7 +875,7 @@
                 <button class="btn btn-primary btn-full" onclick="openPopulation()">
                     🔎 Rechercher dans l'arbre
                 </button>
-                <button class="btn btn-muted btn-full" style="margin-top:8px" onclick="openAnimModal()">
+                <button class="btn btn-parme btn-full" style="margin-top:8px" onclick="openAnimModal()">
                     🚶 Animation
                 </button>
 
@@ -929,6 +944,7 @@
 <!-- ══ MODALE ANIMATION POPULATION ══════════════════ -->
 <div class="modal" id="animModal">
     <div class="modal-box">
+        <div id="animModalBg" class="anim-map-bg-modal"></div>
         <div class="modal-title">🚶 Animation — Population</div>
         <div class="modal-body" style="margin-bottom:8px">
             Fait « marcher » un individu, accompagné de son conjoint et de ses enfants
@@ -4103,21 +4119,17 @@ function animLaunch() {
     stage.innerHTML = '';
     stage.classList.add('show');
 
-    // Fond de scène (facultatif) : ajouté en premier pour rester derrière les personnages.
+    // Fond (facultatif) : étendu à toute la modale, derrière tout son contenu.
     // Une image personnelle choisie par l'utilisateur prime sur la carte.
+    const modalBg = document.getElementById('animModalBg');
+    modalBg.innerHTML = '';
     if (animBgImage) {
-        const bg = document.createElement('div');
-        bg.className = 'anim-map-bg';
-        bg.innerHTML = `<img src="${animEsc(animBgImage)}" style="width:100%;height:100%;object-fit:cover;display:block">`;
-        stage.appendChild(bg);
+        modalBg.innerHTML = `<img src="${animEsc(animBgImage)}">`;
     } else {
         const chosenLot = (document.getElementById('animMapLot').value || '').trim();
         const mapHtml = chosenLot ? animBuildMapBackgroundHtml(chosenLot) : null;
         if (mapHtml) {
-            const bg = document.createElement('div');
-            bg.className = 'anim-map-bg';
-            bg.innerHTML = mapHtml;
-            stage.appendChild(bg);
+            modalBg.innerHTML = mapHtml;
         } else if (chosenLot) {
             toast(`Lot ${chosenLot} introuvable sur la carte chargée — animation lancée sans fond de carte.`);
         }
