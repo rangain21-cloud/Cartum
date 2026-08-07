@@ -4129,7 +4129,7 @@ function animLaunch() {
     }
 
     const stageWidth = stage.clientWidth || 320;
-    const BASE_DURATION = 16; // secondes : marche ralentie (était 6s)
+    const BASE_DURATION = 26; // secondes : marche encore ralentie (était 16s)
 
     // Taille des portraits calculée pour remplir la scène sans jamais faire chevaucher
     // les personnages : on prend en compte la ligne la plus chargée (principal + conjoint(e)s,
@@ -4137,9 +4137,11 @@ function animLaunch() {
     const mainRowCount  = 1 + spouses.length;
     const childRowCount = Math.max(children.length, 1);
     const widestRow      = Math.max(mainRowCount, childRowCount);
-    const GAP_RATIO       = 0.28; // espace entre deux cercles, en fraction de leur taille
-    let avatarPx = stageWidth / (widestRow + (widestRow - 1) * GAP_RATIO);
-    avatarPx = Math.max(56, Math.min(avatarPx, 210)); // grossi (x3-4 vs les 52px d'origine), sans dépasser la place dispo
+    const GAP_RATIO       = 0.4; // espace entre deux cercles, en fraction de leur taille (plus large qu'avant)
+    // +1 : marge de sécurité supplémentaire, pour absorber le décalage horizontal appliqué
+    // plus bas à la ligne des enfants sans jamais rogner les bords de la scène.
+    let avatarPx = stageWidth / (widestRow + 1 + (widestRow - 1) * GAP_RATIO);
+    avatarPx = Math.max(24, Math.min(avatarPx, 210)); // grossi (x3-4 vs les 52px d'origine) quand la place le permet, mais peut rétrécir pour garantir l'absence de chevauchement sur petit écran
     const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
 
     const figMetrics = animFigureMetrics(avatarPx);
@@ -4148,32 +4150,40 @@ function animLaunch() {
     stage.style.height = stageHeight + 'px';
 
     const centerX = stageWidth / 2 - figMetrics.bodyW / 2;
+    // Filet de sécurité final : quelle que soit la largeur d'écran (y compris les cas
+    // extrêmes où la taille minimale des portraits est atteinte), aucune figure ne doit
+    // jamais dépasser les bords de la scène.
+    const clampX = x => Math.max(0, Math.min(x, stageWidth - avatarPx));
 
     // Individu principal : marche de haut en bas, au centre
-    animAddFigure(stage, animData, centerX, 0, BASE_DURATION, avatarPx, walkDistance);
+    animAddFigure(stage, animData, clampX(centerX), 0, BASE_DURATION, avatarPx, walkDistance);
 
     // Conjoint(e)s : à ses côtés, au même rythme
     spouses.forEach((s, i) => {
         const side = (i % 2 === 0) ? 1 : -1;
         const offset = side * step * (Math.floor(i / 2) + 1);
-        animAddFigure(stage, s, centerX + offset, 0, BASE_DURATION, avatarPx, walkDistance);
+        animAddFigure(stage, s, clampX(centerX + offset), 0, BASE_DURATION, avatarPx, walkDistance);
     });
 
     // Enfants : derrière lui, en ligne, du plus âgé (proche, arrive tôt) au plus jeune
     // (loin derrière, arrive tard) — le décalage est proportionnel à l'écart d'âge.
-    const CHILD_BASE_DELAY = 1;    // secondes avant le départ du premier enfant
-    const PER_YEAR_DELAY = 0.2;    // secondes de retard supplémentaire par année d'écart d'âge
+    // Un décalage horizontal fixe garantit qu'aucun enfant ne se retrouve jamais
+    // exactement à la même position horizontale qu'Henri ou son/sa conjoint(e)
+    // (donc aucun chevauchement possible, même à l'arrêt, ni horizontalement ni verticalement).
+    const CHILD_BASE_DELAY = 2;      // secondes avant le départ du premier enfant
+    const PER_YEAR_DELAY = 0.35;     // secondes de retard supplémentaire par année d'écart d'âge
+    const childRowXOffset = step * 0.3; // décalage garanti < marge réservée (aucun risque de dépasser les bords)
 
     const childrenWithAge = children.map(c => ({ ...c, age: animAgeIn1809(c.naissance) }));
     const knownAges = childrenWithAge.map(c => c.age).filter(a => a != null);
     const maxAge = knownAges.length ? Math.max(...knownAges) : null;
     childrenWithAge.sort((a, b) => (b.age != null ? b.age : -1) - (a.age != null ? a.age : -1));
 
-    const startX = centerX - ((childrenWithAge.length - 1) * step) / 2;
+    const startX = centerX + childRowXOffset - ((childrenWithAge.length - 1) * step) / 2;
     childrenWithAge.forEach((c, i) => {
         const ageGap = (maxAge != null && c.age != null) ? (maxAge - c.age) : i * 2; // repli si âge inconnu
-        const delay = CHILD_BASE_DELAY + Math.min(ageGap * PER_YEAR_DELAY, 8);
-        animAddFigure(stage, c, startX + i * step, delay, BASE_DURATION + 1, avatarPx, walkDistance);
+        const delay = CHILD_BASE_DELAY + Math.min(ageGap * PER_YEAR_DELAY, 10);
+        animAddFigure(stage, c, clampX(startX + i * step), delay, BASE_DURATION + 2, avatarPx, walkDistance);
     });
 }
 
