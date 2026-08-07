@@ -428,20 +428,7 @@
             max-width: 96vw; max-height: 90vh; overflow: auto;
             min-width: 280px; min-height: 220px;
             resize: both;
-            position: relative;
         }
-        /* Fond (carte ou image choisie) étendu à toute la modale, derrière tout son contenu */
-        .anim-map-bg-modal {
-            position: absolute; inset: -20px; z-index: 0; overflow: hidden;
-            border-radius: 16px; pointer-events: none;
-        }
-        .anim-map-bg-modal::after {
-            content: ''; position: absolute; inset: 0; background: rgba(15,20,30,.72);
-        }
-        .anim-map-bg-modal svg, .anim-map-bg-modal img {
-            width: 100%; height: 100%; object-fit: cover; display: block;
-        }
-        #animModal .modal-box > *:not(.anim-map-bg-modal) { position: relative; z-index: 1; }
         #animIndiModal .modal-box {
             max-width: 420px; max-height: 85vh; overflow-y: auto;
         }
@@ -527,7 +514,7 @@
         .anim-map-bg {
             position: absolute; inset: 0; z-index: 0; opacity: 0.6; pointer-events: none;
         }
-        .anim-map-bg svg { width: 100%; height: 100%; display: block; }
+        .anim-map-bg svg, .anim-map-bg img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .anim-figure {
             position: absolute; display: flex; flex-direction: column; align-items: center;
             animation-name: anim-walk-down; animation-timing-function: linear;
@@ -944,7 +931,6 @@
 <!-- ══ MODALE ANIMATION POPULATION ══════════════════ -->
 <div class="modal" id="animModal">
     <div class="modal-box">
-        <div id="animModalBg" class="anim-map-bg-modal"></div>
         <div class="modal-title">🚶 Animation — Population</div>
         <div class="modal-body" style="margin-bottom:8px">
             Fait « marcher » un individu, accompagné de son conjoint et de ses enfants
@@ -4119,17 +4105,22 @@ function animLaunch() {
     stage.innerHTML = '';
     stage.classList.add('show');
 
-    // Fond (facultatif) : étendu à toute la modale, derrière tout son contenu.
+    // Fond de scène (facultatif) : ajouté en premier pour rester derrière les personnages,
+    // étendu à toute la largeur et toute la hauteur de la scène de marche.
     // Une image personnelle choisie par l'utilisateur prime sur la carte.
-    const modalBg = document.getElementById('animModalBg');
-    modalBg.innerHTML = '';
     if (animBgImage) {
-        modalBg.innerHTML = `<img src="${animEsc(animBgImage)}">`;
+        const bg = document.createElement('div');
+        bg.className = 'anim-map-bg';
+        bg.innerHTML = `<img src="${animEsc(animBgImage)}">`;
+        stage.appendChild(bg);
     } else {
         const chosenLot = (document.getElementById('animMapLot').value || '').trim();
         const mapHtml = chosenLot ? animBuildMapBackgroundHtml(chosenLot) : null;
         if (mapHtml) {
-            modalBg.innerHTML = mapHtml;
+            const bg = document.createElement('div');
+            bg.className = 'anim-map-bg';
+            bg.innerHTML = mapHtml;
+            stage.appendChild(bg);
         } else if (chosenLot) {
             toast(`Lot ${chosenLot} introuvable sur la carte chargée — animation lancée sans fond de carte.`);
         }
