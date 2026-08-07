@@ -514,7 +514,10 @@
         .anim-map-bg {
             position: absolute; inset: 0; z-index: 0; opacity: 0.6; pointer-events: none;
         }
-        .anim-map-bg svg, .anim-map-bg img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .anim-map-bg svg, .anim-map-bg img {
+            width: 100%; height: 100%; object-fit: contain; object-position: left center;
+            display: block; transform-origin: left center;
+        }
         .anim-figure {
             position: absolute; display: flex; flex-direction: column; align-items: center;
             animation-name: anim-walk-down; animation-timing-function: linear;
@@ -1007,6 +1010,21 @@
             <button class="btn btn-muted btn-sm" id="animBgImgClearBtn" style="display:none" onclick="animClearBgImage()">✕</button>
         </div>
         <p class="anim-hint" style="margin-top:4px">Une image choisie ici remplace la carte comme fond de la scène.</p>
+
+        <label class="anim-field-label" style="margin-top:10px">Taille du fond de scène (cadré à gauche)</label>
+        <div style="display:flex;align-items:center;gap:10px">
+            <input type="range" id="animBgZoomRange" min="0.5" max="3" step="0.05" value="1"
+                   style="flex:1" oninput="animBgZoom = parseFloat(this.value); document.getElementById('animBgZoomVal').textContent = animBgZoom.toFixed(2) + '×'; animApplyBgZoom();">
+            <span id="animBgZoomVal" class="anim-hint" style="min-width:44px;text-align:right">1.00×</span>
+        </div>
+
+        <label class="anim-field-label" style="margin-top:10px">Taille des portraits des individus</label>
+        <div style="display:flex;align-items:center;gap:10px">
+            <input type="range" id="animAvatarZoomRange" min="0.5" max="2.5" step="0.05" value="1"
+                   style="flex:1" oninput="animAvatarZoom = parseFloat(this.value); document.getElementById('animAvatarZoomVal').textContent = animAvatarZoom.toFixed(2) + '×';">
+            <span id="animAvatarZoomVal" class="anim-hint" style="min-width:44px;text-align:right">1.00×</span>
+        </div>
+        <p class="anim-hint" style="margin-top:4px">Relancez l'animation pour appliquer un changement de taille des portraits.</p>
 
         <button class="btn btn-success btn-full" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
 
@@ -3482,6 +3500,8 @@ async function openPopulation() {
 // de ses proches (JSON), et l'appli filtre les vivants puis lance leur marche.
 const ANIM_DEATH_CUTOFF = new Date('1809-12-31T23:59:59');
 let animData = null;
+let animBgZoom = 1;       // facteur d'agrandissement du fond de scène (carte ou image), cadré à droite
+let animAvatarZoom = 1;   // facteur d'agrandissement des portraits des individus
 
 function animEsc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
@@ -4102,6 +4122,14 @@ function animBuildMapBackgroundHtml(idLot) {
     return container.innerHTML;
 }
 
+// Applique le facteur de zoom courant (animBgZoom) au fond de scène actuellement affiché
+// (carte SVG ou image perso), avec un ancrage à gauche (transform-origin: left center en CSS) :
+// agrandir "pousse" le fond vers la droite en le cadrant sur son bord gauche, sans changer sa position d'ancrage.
+function animApplyBgZoom() {
+    const el = document.querySelector('#animStage .anim-map-bg svg, #animStage .anim-map-bg img');
+    if (el) el.style.transform = `scale(${animBgZoom})`;
+}
+
 function animLaunch() {
     if (!animData) { toast("Chargez d'abord les données de l'individu"); return; }
     const stage = document.getElementById('animStage');
@@ -4128,6 +4156,7 @@ function animLaunch() {
             toast(`Lot ${chosenLot} introuvable sur la carte chargée — animation lancée sans fond de carte.`);
         }
     }
+    animApplyBgZoom();
 
     const spouses  = animData.relations.filter(r => r.relation === 'conjoint' && animIsAlive(r.deces));
     const children = animData.relations.filter(r => r.relation === 'enfant'   && animIsAlive(r.deces));
@@ -4152,6 +4181,7 @@ function animLaunch() {
     // plus bas à la ligne des enfants sans jamais rogner les bords de la scène.
     let avatarPx = stageWidth / (widestRow + 1 + (widestRow - 1) * GAP_RATIO);
     avatarPx = Math.max(24, Math.min(avatarPx, 160)); // grossi vs les 52px d'origine quand la place le permet, mais peut rétrécir pour garantir l'absence de chevauchement sur petit écran (taille max réduite pour des portraits plus discrets)
+    avatarPx = Math.max(16, Math.min(avatarPx * animAvatarZoom, 260)); // applique le zoom manuel choisi par l'utilisateur, avec des bornes de sécurité
     const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
 
     const figMetrics = animFigureMetrics(avatarPx);
