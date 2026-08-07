@@ -4077,6 +4077,9 @@ function animBuildMapBackgroundHtml(idLot) {
     svgClone.style.width = '100%';
     svgClone.style.height = '100%';
     svgClone.style.display = 'block';
+    // "slice" = équivalent SVG de object-fit:cover : remplit tout le cadre (largeur ET hauteur),
+    // quitte à rogner les bords, plutôt que de laisser des bandes vides (comportement par défaut "meet").
+    svgClone.setAttribute('preserveAspectRatio', 'xMidYMid slice');
 
     const lotEl = animFindLotElement(idLot);
     if (lotEl) {
