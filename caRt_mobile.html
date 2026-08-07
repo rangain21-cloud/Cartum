@@ -4145,7 +4145,7 @@ function animLaunch() {
     // +1 : marge de sécurité supplémentaire, pour absorber le décalage horizontal appliqué
     // plus bas à la ligne des enfants sans jamais rogner les bords de la scène.
     let avatarPx = stageWidth / (widestRow + 1 + (widestRow - 1) * GAP_RATIO);
-    avatarPx = Math.max(24, Math.min(avatarPx, 210)); // grossi (x3-4 vs les 52px d'origine) quand la place le permet, mais peut rétrécir pour garantir l'absence de chevauchement sur petit écran
+    avatarPx = Math.max(24, Math.min(avatarPx, 160)); // grossi vs les 52px d'origine quand la place le permet, mais peut rétrécir pour garantir l'absence de chevauchement sur petit écran (taille max réduite pour des portraits plus discrets)
     const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
 
     const figMetrics = animFigureMetrics(avatarPx);
@@ -4181,7 +4181,14 @@ function animLaunch() {
     const childrenWithAge = children.map(c => ({ ...c, age: animAgeIn1809(c.naissance) }));
     const knownAges = childrenWithAge.map(c => c.age).filter(a => a != null);
     const maxAge = knownAges.length ? Math.max(...knownAges) : null;
-    childrenWithAge.sort((a, b) => (b.age != null ? b.age : -1) - (a.age != null ? a.age : -1));
+    // Tri par date de naissance exacte (plus ancienne d'abord) plutôt que par âge arrondi à l'année,
+    // pour un ordre chronologique fiable même entre enfants nés la même année ; les dates inconnues
+    // sont placées en dernier.
+    childrenWithAge.sort((a, b) => {
+        const da = a.naissance || '9999-99-99';
+        const db = b.naissance || '9999-99-99';
+        return da < db ? -1 : da > db ? 1 : 0;
+    });
 
     const startX = centerX + childRowXOffset - ((childrenWithAge.length - 1) * step) / 2;
     childrenWithAge.forEach((c, i) => {
