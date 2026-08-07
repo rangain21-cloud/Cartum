@@ -514,7 +514,7 @@
         .anim-map-bg {
             position: absolute; inset: 0; z-index: 0; opacity: 0.6; pointer-events: none;
         }
-        .anim-map-bg svg, .anim-map-bg img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .anim-map-bg svg, .anim-map-bg img { width: 100%; height: 100%; object-fit: contain; display: block; }
         .anim-figure {
             position: absolute; display: flex; flex-direction: column; align-items: center;
             animation-name: anim-walk-down; animation-timing-function: linear;
@@ -4077,9 +4077,9 @@ function animBuildMapBackgroundHtml(idLot) {
     svgClone.style.width = '100%';
     svgClone.style.height = '100%';
     svgClone.style.display = 'block';
-    // "slice" = équivalent SVG de object-fit:cover : remplit tout le cadre (largeur ET hauteur),
-    // quitte à rogner les bords, plutôt que de laisser des bandes vides (comportement par défaut "meet").
-    svgClone.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+    // "meet" : montre la carte entière (rien n'est rogné), quitte à laisser un léger espace
+    // vide sur les côtés si les proportions de la scène ne correspondent pas exactement.
+    svgClone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
     const lotEl = animFindLotElement(idLot);
     if (lotEl) {
