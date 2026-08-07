@@ -423,7 +423,9 @@
 
         /* ─── ANIMATION MODAL (Population) ──────────── */
         #animModal .modal-box {
-            max-width: min(94vw, 640px); max-height: 90vh; overflow-y: auto;
+            max-width: min(94vw, 640px); max-height: 90vh; overflow: auto;
+            min-width: 280px; min-height: 220px;
+            resize: both;
         }
         #animIndiModal .modal-box {
             max-width: 420px; max-height: 85vh; overflow-y: auto;
