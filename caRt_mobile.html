@@ -4174,9 +4174,9 @@ function animLaunch() {
     // Un décalage horizontal fixe garantit qu'aucun enfant ne se retrouve jamais
     // exactement à la même position horizontale qu'Henri ou son/sa conjoint(e)
     // (donc aucun chevauchement possible, même à l'arrêt, ni horizontalement ni verticalement).
-    const CHILD_BASE_DELAY = 2;      // secondes avant le départ du premier enfant
+    const CHILD_BASE_DELAY = 6;      // secondes avant le départ du premier enfant (augmenté pour ne jamais rattraper les parents)
     const PER_YEAR_DELAY = 0.35;     // secondes de retard supplémentaire par année d'écart d'âge
-    const childRowXOffset = step * 0.3; // décalage garanti < marge réservée (aucun risque de dépasser les bords)
+    const childRowXOffset = avatarPx; // décalage garanti par la marge réservée plus haut (aucun risque de dépasser les bords), agrandi pour éviter tout chevauchement visuel avec la ligne principale
 
     const childrenWithAge = children.map(c => ({ ...c, age: animAgeIn1809(c.naissance) }));
     const knownAges = childrenWithAge.map(c => c.age).filter(a => a != null);
