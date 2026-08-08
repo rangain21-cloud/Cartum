@@ -999,7 +999,7 @@
         </div>
         <datalist id="animProprioList"></datalist>
         <datalist id="animMapLotList"></datalist>
-        <p class="anim-hint" style="margin-top:4px">Si renseigné, la carte s'affichera en fond de la scène, recentrée et surlignée sur ce lot.</p>
+        <p class="anim-hint" style="margin-top:4px">Si renseigné, la carte s'affichera en fond de la scène (vue d'ensemble, non recentrée) et le lot y sera surligné.</p>
 
         <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
             <img id="animBgImgPreview" style="display:none;width:40px;height:40px;border-radius:6px;object-fit:cover;border:2px solid var(--accent)">
@@ -4082,8 +4082,8 @@ function animAddFigure(stage, person, xPx, delaySec, durationSec, avatarPx, walk
 // window.BananaAnimation?.walk(...) prendrait ici le relais de la marche maison ci-dessous.
 // ── FOND DE CARTE (IdProprio / IdLot choisis) POUR L'ANIMATION ───
 // Reconstruit une copie de la carte SVG chargée dans l'appli (jamais la carte affichée
-// à l'écran elle-même), recentrée et surlignée sur le lot choisi, pour servir de fond
-// à la scène de marche. Purement local : aucune donnée n'est envoyée où que ce soit.
+// à l'écran elle-même), vue d'ensemble (non recentrée) avec le lot choisi surligné, pour
+// servir de fond à la scène de marche. Purement local : aucune donnée n'est envoyée où que ce soit.
 function animFindLotElement(idLot) {
     if (!idLot || !currentSvg || !Array.isArray(allSvgElements)) return null;
     return allSvgElements.find(el => el._csvData && String(el._csvData.IdLot) === String(idLot)) || null;
@@ -4110,14 +4110,8 @@ function animBuildMapBackgroundHtml(idLot) {
             cloneTarget.style.stroke = '#ffffff';
             cloneTarget.style.strokeWidth = '4';
         }
-        // Recentre/zoome la vue sur ce lot (mêmes coordonnées géométriques que la carte source)
-        try {
-            const bbox = lotEl.getBBox();
-            const pad = Math.max(bbox.width, bbox.height) * 2.2 || 200;
-            const vx = bbox.x + bbox.width / 2 - pad / 2;
-            const vy = bbox.y + bbox.height / 2 - pad / 2;
-            svgClone.setAttribute('viewBox', `${vx} ${vy} ${pad} ${pad}`);
-        } catch (e) { /* getBBox indisponible : on garde la vue complète de la carte */ }
+        // Le lot est surligné mais la vue n'est plus recentrée/zoomée dessus : on garde la carte
+        // entière (dézoomée) en fond de scène, pour une meilleure lisibilité d'ensemble.
     }
     return container.innerHTML;
 }
