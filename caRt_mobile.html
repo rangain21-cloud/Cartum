@@ -4097,9 +4097,27 @@ function animBuildMapBackgroundHtml(idLot) {
     svgClone.style.width = '100%';
     svgClone.style.height = '100%';
     svgClone.style.display = 'block';
-    // "meet" : montre la carte entière (rien n'est rogné), quitte à laisser un léger espace
-    // vide sur les côtés si les proportions de la scène ne correspondent pas exactement.
-    svgClone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    // "xMinYMid meet" : montre la carte entière, alignée sur son bord GAUCHE (xMin, pas xMid) —
+    // c'est cet alignement natif SVG, et non une propriété CSS (sans effet sur un <svg> inline),
+    // qui garantit le cadrage à gauche demandé.
+    svgClone.setAttribute('preserveAspectRatio', 'xMinYMid meet');
+
+    // Détermine la vue ("viewBox") de base = carte entière, dézoomée, pour pouvoir ensuite
+    // zoomer de façon fiable (cf. animApplyBgZoom) en réduisant cette vue depuis son bord gauche,
+    // plutôt qu'en appliquant un transform CSS sur la boîte SVG (qui ne bouge pas son contenu interne).
+    let baseVB = svgClone.getAttribute('viewBox');
+    if (!baseVB) {
+        try {
+            const b = currentSvg.getBBox();
+            baseVB = `${b.x} ${b.y} ${b.width} ${b.height}`;
+            svgClone.setAttribute('viewBox', baseVB);
+        } catch (e) { /* pas de bbox disponible : le zoom restera inactif sur cette carte */ }
+    }
+    if (baseVB) {
+        const [bx, by, bw, bh] = baseVB.trim().split(/\s+/).map(Number);
+        svgClone.dataset.baseVbX = bx; svgClone.dataset.baseVbY = by;
+        svgClone.dataset.baseVbW = bw; svgClone.dataset.baseVbH = bh;
+    }
 
     const lotEl = animFindLotElement(idLot);
     if (lotEl) {
@@ -4116,12 +4134,28 @@ function animBuildMapBackgroundHtml(idLot) {
     return container.innerHTML;
 }
 
-// Applique le facteur de zoom courant (animBgZoom) au fond de scène actuellement affiché
-// (carte SVG ou image perso), avec un ancrage à gauche (transform-origin: left center en CSS) :
-// agrandir "pousse" le fond vers la droite en le cadrant sur son bord gauche, sans changer sa position d'ancrage.
+// Applique le facteur de zoom courant (animBgZoom) au fond de scène actuellement affiché.
+// - Image perso (<img>) : un vrai élément remplacé, donc object-fit/object-position + un simple
+//   transform CSS ancré à gauche (transform-origin: left center) fonctionnent nativement.
+// - Carte (<svg> inline) : un transform CSS ne fait qu'agrandir la boîte du SVG (souvent en grande
+//   partie transparente), sans zoomer son contenu ni respecter l'ancrage gauche. On zoome donc en
+//   réduisant directement le viewBox depuis son bord gauche (bx fixe), ce qui zoome réellement
+//   le dessin de la carte et le garde bien ancré à gauche.
 function animApplyBgZoom() {
-    const el = document.querySelector('#animStage .anim-map-bg svg, #animStage .anim-map-bg img');
-    if (el) el.style.transform = `scale(${animBgZoom})`;
+    const svgEl = document.querySelector('#animStage .anim-map-bg svg');
+    if (svgEl) {
+        svgEl.style.transform = '';
+        const bx = parseFloat(svgEl.dataset.baseVbX), by = parseFloat(svgEl.dataset.baseVbY);
+        const bw = parseFloat(svgEl.dataset.baseVbW), bh = parseFloat(svgEl.dataset.baseVbH);
+        if (!isNaN(bx) && !isNaN(bw) && bw > 0 && bh > 0) {
+            const w = bw / animBgZoom, h = bh / animBgZoom;
+            const y = by + (bh - h) / 2; // centré verticalement, ancré à gauche horizontalement (x = bx fixe)
+            svgEl.setAttribute('viewBox', `${bx} ${y} ${w} ${h}`);
+        }
+        return;
+    }
+    const imgEl = document.querySelector('#animStage .anim-map-bg img');
+    if (imgEl) imgEl.style.transform = `scale(${animBgZoom})`;
 }
 
 function animLaunch() {
