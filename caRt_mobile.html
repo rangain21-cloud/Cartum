@@ -3629,6 +3629,15 @@ function animGedDateToISO(raw) {
     if (m) return `${m[1]}-01-01`;
     return '';
 }
+// Détecte les dates GEDCOM approximatives/estimées : qualificatifs standards (ABT, EST, CAL, INT),
+// leurs équivalents francophones parfois utilisés par certains logiciels de généalogie (ENV, VERS,
+// CIRCA), ou une fourchette (BET ... AND ...). Une date exacte (jour/mois/année complets, sans
+// qualificatif) n'est pas considérée comme approximative.
+function animGedDateIsApprox(raw) {
+    if (!raw) return false;
+    const s = raw.trim().toUpperCase();
+    return /\b(ABT|EST|CAL|INT|ENV|VERS|CIRCA|ABOUT)\b/.test(s) || /\bBET\b.*\bAND\b/.test(s);
+}
 function animGedGivenName(name) {
     return (name || '').split('/')[0].trim() || (name || '').trim();
 }
@@ -3824,12 +3833,20 @@ function animGedDoSearch() {
     if (count === 0) results.innerHTML = '<p class="anim-hint">Aucun résultat.</p>';
 }
 
-// Vivant au 31/12/1809 : né à cette date ou avant (ou naissance inconnue), et pas mort avant
+// Vivant au 31/12/1809 : né à cette date ou avant (ou naissance inconnue), et pas mort avant.
+// Pour une naissance approximative (ABT/EST/CAL/ENV/VERS/BET...AND...), on applique une marge de
+// tolérance de quelques années autour du seuil : l'incertitude sur la date ne doit pas exclure à
+// tort un enfant qui pourrait très bien être né avant la coupure.
+const ANIM_APPROX_TOLERANCE_YEARS = 5;
 function animGedAliveAtCutoff(p) {
     const cutoffISO = '1809-12-31';
     const birt = animGedDateToISO(p.birt);
     const deat = animGedDateToISO(p.deat);
-    if (birt && birt > cutoffISO) return false; // pas encore né
+    if (birt && birt > cutoffISO) {
+        if (!animGedDateIsApprox(p.birt)) return false; // pas encore né (date certaine)
+        const birthYear = parseInt(birt.slice(0, 4), 10);
+        if (!isNaN(birthYear) && birthYear - 1809 > ANIM_APPROX_TOLERANCE_YEARS) return false; // trop tardif même avec la marge
+    }
     if (deat && deat <= cutoffISO) return false; // déjà décédé
     return true;
 }
