@@ -1013,7 +1013,7 @@
 
         <label class="anim-field-label" style="margin-top:10px">Taille du fond de scène (cadré à gauche)</label>
         <div style="display:flex;align-items:center;gap:10px">
-            <input type="range" id="animBgZoomRange" min="0.5" max="3" step="0.05" value="1"
+            <input type="range" id="animBgZoomRange" min="0.5" max="10" step="0.1" value="1"
                    style="flex:1" oninput="animBgZoom = parseFloat(this.value); document.getElementById('animBgZoomVal').textContent = animBgZoom.toFixed(2) + '×'; animApplyBgZoom();">
             <span id="animBgZoomVal" class="anim-hint" style="min-width:44px;text-align:right">1.00×</span>
         </div>
