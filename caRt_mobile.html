@@ -3603,7 +3603,6 @@ function closeAnimModal() {
 // zooms, date de coupure...) pour permettre de repartir de zéro avec de nouveaux choix.
 function animReset() {
     animData = null;
-    animGed = null;
     animGedLastSelectedId = null;
     animBgImage = null;
     animPendingPortrait = null;
@@ -3612,9 +3611,9 @@ function animReset() {
 
     document.getElementById('animCutoffDate').value = ANIM_DEATH_CUTOFF_DEFAULT_ISO;
 
-    document.getElementById('animGedInput').value = '';
-    document.getElementById('animGedStatus').textContent = '';
-    document.getElementById('animGedSearchBlock').style.display = 'none';
+    // Le fichier GEDCOM déjà chargé (animGed, l'input file et son statut) est conservé
+    // en mémoire : seule la recherche/sélection d'individu est vidée pour permettre
+    // de choisir à nouveau sans avoir à recharger le fichier.
     document.getElementById('animGedSearch').value = '';
     document.getElementById('animGedResults').innerHTML = '';
 
@@ -3645,7 +3644,9 @@ function animReset() {
 
     document.getElementById('animLaunchBtn').disabled = true;
 
-    toast('Animation réinitialisée : faites de nouveaux choix.');
+    toast(animGed
+        ? 'Animation réinitialisée (fichier GEDCOM conservé) : faites de nouveaux choix.'
+        : 'Animation réinitialisée : faites de nouveaux choix.');
 }
 
 // ── Déplacement de la modale Animation (glisser depuis le titre) ─────────
