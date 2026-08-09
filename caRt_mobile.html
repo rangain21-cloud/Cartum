@@ -1037,10 +1037,10 @@
         <label class="anim-field-label" style="margin-top:10px">Taille des portraits des individus</label>
         <div style="display:flex;align-items:center;gap:10px">
             <input type="range" id="animAvatarZoomRange" min="0.5" max="2.5" step="0.05" value="1"
-                   style="flex:1" oninput="animAvatarZoom = parseFloat(this.value); document.getElementById('animAvatarZoomVal').textContent = animAvatarZoom.toFixed(2) + '×';">
+                   style="flex:1" oninput="animAvatarZoom = parseFloat(this.value); document.getElementById('animAvatarZoomVal').textContent = animAvatarZoom.toFixed(2) + '×'; animApplyAvatarZoom();">
             <span id="animAvatarZoomVal" class="anim-hint" style="min-width:44px;text-align:right">1.00×</span>
         </div>
-        <p class="anim-hint" style="margin-top:4px">Relancez l'animation pour appliquer un changement de taille des portraits.</p>
+        <p class="anim-hint" style="margin-top:4px">S'applique immédiatement si l'animation est déjà en cours ; sinon, sera pris en compte au lancement.</p>
 
         <div style="text-align:center">
             <button class="btn btn-success" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
@@ -3552,6 +3552,7 @@ function animCutoffDateChanged() {
 let animData = null;
 let animBgZoom = 1;       // facteur d'agrandissement du fond de scène (carte ou image), cadré à droite
 let animAvatarZoom = 1;   // facteur d'agrandissement des portraits des individus
+let animBaseAvatarPx = null; // taille de base (avant zoom) des portraits, calculée par animLaunch selon la place disponible ; sert à appliquer le curseur de zoom en direct sans relancer toute l'animation
 
 function animEsc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
@@ -3608,6 +3609,7 @@ function animReset() {
     animPendingPortrait = null;
     animBgZoom = 1;
     animAvatarZoom = 1;
+    animBaseAvatarPx = null;
 
     document.getElementById('animCutoffDate').value = ANIM_DEATH_CUTOFF_DEFAULT_ISO;
 
@@ -3994,7 +3996,7 @@ function animGedDoSearch() {
         const hay = (p.name.replace(/\//g, ' ') + ' ' + p.birt).toLowerCase();
         if (!terms.every(t => hay.includes(t))) continue;
         count++;
-        if (count > 30) break; // on limite l'affichage pour rester réactif
+        if (count > 90) break; // on limite l'affichage pour rester réactif (x3 par rapport à la limite précédente)
 
         const age = animAgeAtCutoff(p.birt);
         const ageTxt = age != null ? ` — ${age} an${age > 1 ? 's' : ''} à la date pivot` : '';
@@ -4373,6 +4375,30 @@ function animApplyBgZoom() {
     if (imgEl) imgEl.style.transform = `scale(${animBgZoom})`;
 }
 
+// Applique le curseur de zoom des portraits en direct sur les personnages déjà affichés,
+// sans relancer la marche (positions/rythme inchangés) : ne retouche que les tailles.
+function animApplyAvatarZoom() {
+    if (animBaseAvatarPx == null) return; // rien n'a encore été lancé, pas de figure à ajuster
+    const stage = document.getElementById('animStage');
+    const figures = stage.querySelectorAll('.anim-figure');
+    if (!figures.length) return;
+    const avatarPx = Math.max(16, Math.min(animBaseAvatarPx * animAvatarZoom, 260));
+    const m = animFigureMetrics(avatarPx);
+    const cx = m.bodyW / 2;
+    figures.forEach(fig => {
+        const body = fig.querySelector('.anim-body');
+        const avatar = fig.querySelector('.anim-avatar');
+        const name = fig.querySelector('.anim-name');
+        if (body) { body.style.width = m.bodyW + 'px'; body.style.height = m.bodyH + 'px'; }
+        if (avatar) {
+            avatar.style.width = m.bustW + 'px';
+            avatar.style.height = m.bustH + 'px';
+            avatar.style.left = Math.round(cx - m.bustW / 2) + 'px';
+        }
+        if (name) name.style.fontSize = m.nameSize + 'px';
+    });
+}
+
 function animLaunch() {
     if (!animData) { toast("Chargez d'abord les données de l'individu"); return; }
     const stage = document.getElementById('animStage');
@@ -4424,6 +4450,7 @@ function animLaunch() {
     // plus bas à la ligne des enfants sans jamais rogner les bords de la scène.
     let avatarPx = stageWidth / (widestRow + 1 + (widestRow - 1) * GAP_RATIO);
     avatarPx = Math.max(24, Math.min(avatarPx, 160)); // grossi vs les 52px d'origine quand la place le permet, mais peut rétrécir pour garantir l'absence de chevauchement sur petit écran (taille max réduite pour des portraits plus discrets)
+    animBaseAvatarPx = avatarPx; // mémorisé pour que le curseur de zoom puisse ajuster la taille en direct, sans tout relancer
     avatarPx = Math.max(16, Math.min(avatarPx * animAvatarZoom, 260)); // applique le zoom manuel choisi par l'utilisateur, avec des bornes de sécurité
     const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
 
