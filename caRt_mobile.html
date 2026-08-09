@@ -1015,7 +1015,7 @@
         </div>
         <datalist id="animProprioList"></datalist>
         <datalist id="animMapLotList"></datalist>
-        <p class="anim-hint" style="margin-top:4px">Si renseigné, la carte s'affichera en fond de la scène (vue d'ensemble, non recentrée) et le lot y sera surligné.</p>
+        <p class="anim-hint" style="margin-top:4px">Si renseigné, la carte s'affichera en fond de la scène (vue d'ensemble, non recentrée), le lot y sera surligné et les autres lots du même propriétaire apparaîtront en jaune or.</p>
 
         <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
             <img id="animBgImgPreview" style="display:none;width:40px;height:40px;border-radius:6px;object-fit:cover;border:2px solid var(--accent)">
@@ -4352,6 +4352,25 @@ function animBuildMapBackgroundHtml(idLot) {
     }
 
     const lotEl = animFindLotElement(idLot);
+    const idProprio = (lotEl && lotEl._csvData) ? lotEl._csvData.IdProprio : null;
+
+    // Met en évidence, en jaune or, les autres lots appartenant au même propriétaire —
+    // fait avant le surlignage du lot principal ci-dessous, pour que celui-ci reste le
+    // plus visible (bordure blanche épaisse) par rapport aux autres lots du propriétaire.
+    if (idProprio && Array.isArray(allSvgElements)) {
+        allSvgElements.forEach(el => {
+            if (!el._csvData || el._csvData.IdProprio !== idProprio) return;
+            if (String(el._csvData.IdLot) === String(idLot)) return; // le lot principal est traité séparément
+            const label = el.getAttribute('inkscape:label');
+            const cloneTarget = label ? svgClone.querySelector(`[inkscape\\:label="${CSS.escape(label)}"]`) : null;
+            if (cloneTarget) {
+                cloneTarget.style.fill = '#d4af37'; // jaune or, plus discret que le lot principal
+                cloneTarget.style.stroke = '#ffffff';
+                cloneTarget.style.strokeWidth = '2';
+            }
+        });
+    }
+
     if (lotEl) {
         const label = lotEl.getAttribute('inkscape:label');
         const cloneTarget = label ? svgClone.querySelector(`[inkscape\\:label="${CSS.escape(label)}"]`) : null;
