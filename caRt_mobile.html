@@ -966,7 +966,7 @@
         <div id="animGedSearchBlock" style="display:none;margin-top:8px">
             <label class="anim-field-label">Rechercher l'individu (prénom, nom, année...)</label>
             <input type="text" id="animGedSearch" class="search-input" placeholder="ex : Henri Ract 1756" oninput="animGedDoSearch()">
-            <div id="animGedResults" style="max-height:160px;overflow-y:auto;margin-top:6px"></div>
+            <div id="animGedResults" style="max-height:40vh;min-height:160px;overflow-y:auto;margin-top:6px"></div>
         </div>
 
         <details style="margin-top:14px">
@@ -1001,7 +1001,7 @@
 
         <label class="anim-field-label">Données (JSON)</label>
         <textarea id="animJson" placeholder='{"prenom":"Jean","portrait":"https://...jpg","relations":[{"prenom":"Marie","nom":"Dupont","naissance":"1780-04-12","portrait":"https://...jpg","relation":"conjoint","deces":""},{"prenom":"Paul","nom":"Dupont","naissance":"1802-11-03","portrait":"https://...jpg","relation":"enfant","deces":"1830-05-02"}]}'></textarea>
-        <p class="anim-hint" style="margin-top:4px">Champs optionnels par proche : "nom" et "naissance" (année suffit) permettent d'afficher nom + âge à la date choisie ci-dessus.</p>
+        <p class="anim-hint" style="margin-top:4px">Champs optionnels : "nom", "suffixe" et "naissance" (année suffit), sur l'individu principal comme sur chaque proche, permettent d'afficher nom + âge à la date choisie ci-dessus.</p>
 
         <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn btn-primary" style="flex:1" onclick="animParseAndLoad()">📥 Charger le JSON</button>
@@ -4087,7 +4087,15 @@ function animGedSelectIndividual(id) {
         }
     }
 
-    animData = { prenom: animGedGivenName(main.name), nom: animGedSurname(main.name), relations, evenements: animGedEventsForDisplay(main) };
+    animData = {
+        prenom: animGedGivenName(main.name),
+        nom: animGedSurname(main.name),
+        suffixe: animGedSuffix(main),
+        naissance: animGedDateToISO(main.birt),
+        deces: animGedDateToISO(main.deat),
+        relations,
+        evenements: animGedEventsForDisplay(main)
+    };
     if (animPendingPortrait) animData.portrait = animPendingPortrait;
     document.getElementById('animJson').value = JSON.stringify(animData, null, 2);
     document.getElementById('animGedResults').innerHTML = '';
@@ -4206,10 +4214,16 @@ function animRenderPreview() {
         else if (r.relation === 'enfant') children.push({ ...r, idx });
     });
 
+    const mainFullName = [animData.prenom, animData.nom].filter(Boolean).join(' ');
+    const mainSuffix = (animData.suffixe || '').trim();
+    const mainDisplayName = mainSuffix ? `${mainFullName} ${mainSuffix}` : mainFullName;
+    const mainAge = animAgeAtCutoff(animData.naissance);
+    const mainAgeTxt = mainAge != null ? `, ${mainAge} an${mainAge > 1 ? 's' : ''} en ${animGetCutoffYear()}` : '';
+
     let html = `<div class="anim-person-preview">
         <img class="anim-avatar" src="${animEsc(animData.portrait || '')}" onerror="this.style.opacity=0.3">
         <div class="anim-rel-name">
-            ${animEsc(animData.prenom)}
+            ${animEsc(mainDisplayName)}${animEsc(mainAgeTxt)}
             <div class="anim-rel-tag">Individu principal</div>
         </div>
         <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(animData.prenom)}">
