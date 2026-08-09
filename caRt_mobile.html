@@ -1027,6 +1027,15 @@
         </div>
         <p class="anim-hint" style="margin-top:4px">Une image choisie ici remplace la carte comme fond de la scène.</p>
 
+        <div style="text-align:center">
+            <button class="btn btn-success" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
+        </div>
+        <div style="text-align:center">
+            <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="animReset()">🔄 Réinitialiser l'animation</button>
+        </div>
+
+        <div id="animPreview"></div>
+
         <label class="anim-field-label" style="margin-top:10px">Taille du fond de scène (cadré à gauche)</label>
         <div style="display:flex;align-items:center;gap:10px">
             <input type="range" id="animBgZoomRange" min="0.5" max="10" step="0.1" value="1"
@@ -1042,14 +1051,6 @@
         </div>
         <p class="anim-hint" style="margin-top:4px">S'applique immédiatement si l'animation est déjà en cours ; sinon, sera pris en compte au lancement.</p>
 
-        <div style="text-align:center">
-            <button class="btn btn-success" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
-        </div>
-        <div style="text-align:center">
-            <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="animReset()">🔄 Réinitialiser l'animation</button>
-        </div>
-
-        <div id="animPreview"></div>
         <div id="animStage"></div>
 
         <div class="modal-btns" style="margin-top:14px">
