@@ -3801,6 +3801,20 @@ function animGedSurname(name) {
     const parts = (name || '').split('/');
     return (parts[1] || '').trim();
 }
+// Suffixe (fils, Jr., III...) : priorité à la balise GEDCOM NSFX explicite, sinon on
+// retombe sur le texte qui suit le nom de famille dans la balise NAME elle-même
+// (convention "Prénom /Nom/ Suffixe" utilisée par certains logiciels de généalogie).
+function animGedSuffix(p) {
+    if (p && p.nsfx) return p.nsfx.trim();
+    const parts = ((p && p.name) || '').split('/');
+    return (parts[2] || '').trim();
+}
+// Nom complet affichable (prénom + nom + suffixe éventuel), pour les listes de résultats.
+function animGedFullDisplayName(p) {
+    const base = [animGedGivenName(p.name), animGedSurname(p.name)].filter(Boolean).join(' ');
+    const suffix = animGedSuffix(p);
+    return suffix ? `${base} ${suffix}` : base;
+}
 
 // Balises GEDCOM reconnues comme "événements" (avec DATE/PLAC éventuels en sous-niveau)
 const ANIM_GED_EVENT_TAGS = new Set([
@@ -3838,7 +3852,7 @@ function animParseGedcom(text) {
             const tag = parts[1];
             if (tag === 'INDI') {
                 curIndi = xref; curFam = null; context = null; curEvent = null; curNoteTarget = null;
-                individuals.set(curIndi, { id: curIndi, name: '', sex: '', birt: '', deat: '', famc: [], fams: [], events: [] });
+                individuals.set(curIndi, { id: curIndi, name: '', nsfx: '', sex: '', birt: '', deat: '', famc: [], fams: [], events: [] });
             } else if (tag === 'FAM') {
                 curFam = xref; curIndi = null; context = null; curEvent = null; curNoteTarget = null;
                 families.set(curFam, { id: curFam, husb: '', wife: '', chil: [], events: [] });
@@ -3884,6 +3898,8 @@ function animParseGedcom(text) {
             } else if (tag === 'NOTE' && curEvent) {
                 curEvent.note = curEvent.note ? curEvent.note + ' ' + value : value;
                 curNoteTarget = curEvent;
+            } else if (tag === 'NSFX' && context === 'NAME') {
+                p.nsfx = value;
             }
         }
         if (curFam && level === 1) {
@@ -3971,19 +3987,30 @@ function animGedDoSearch() {
     const results = document.getElementById('animGedResults');
     results.innerHTML = '';
     if (!animGed || q.length < 2) return;
+    const { individuals, families } = animGed;
     const terms = q.split(/\s+/);
     let count = 0;
-    for (const p of animGed.individuals.values()) {
+    for (const p of individuals.values()) {
         const hay = (p.name.replace(/\//g, ' ') + ' ' + p.birt).toLowerCase();
         if (!terms.every(t => hay.includes(t))) continue;
         count++;
         if (count > 30) break; // on limite l'affichage pour rester réactif
+
+        const age = animAgeAtCutoff(p.birt);
+        const ageTxt = age != null ? ` — ${age} an${age > 1 ? 's' : ''} à la date pivot` : '';
+
+        const spouseName = animGedLivingSpouseName(p, individuals, families);
+        const spouseTxt = spouseName
+            ? `💑 Conjoint(e) vivant(e) à la date pivot : ${spouseName}`
+            : `💑 Aucun conjoint vivant à la date pivot`;
+
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'anim-ged-item';
         btn.onclick = () => animGedSelectIndividual(p.id);
-        btn.innerHTML = `${animEsc(p.name.replace(/\//g, ' ').trim())}
-            <div class="sub">né(e) ${animEsc(p.birt || '?')} — décédé(e) ${animEsc(p.deat || '(inconnu)')}</div>`;
+        btn.innerHTML = `${animEsc(animGedFullDisplayName(p))}
+            <div class="sub">né(e) ${animEsc(p.birt || '?')} — décédé(e) ${animEsc(p.deat || '(inconnu)')}${animEsc(ageTxt)}</div>
+            <div class="sub">${animEsc(spouseTxt)}</div>`;
         results.appendChild(btn);
     }
     if (count === 0) results.innerHTML = '<p class="anim-hint">Aucun résultat.</p>';
@@ -4005,6 +4032,20 @@ function animGedAliveAtCutoff(p) {
     }
     if (deat && deat <= cutoffISO) return false; // déjà décédé
     return true;
+}
+
+// Renvoie le nom complet du premier conjoint (parmi les familles de p) encore en vie à la
+// date pivot, ou null si aucun — utile pour repérer facilement le bon individu principal
+// dans la liste de résultats, sans avoir à ouvrir chaque fiche.
+function animGedLivingSpouseName(p, individuals, families) {
+    for (const famId of p.fams) {
+        const fam = families.get(famId);
+        if (!fam) continue;
+        const spouseId = (fam.husb === p.id) ? fam.wife : fam.husb;
+        const spouse = spouseId ? individuals.get(spouseId) : null;
+        if (spouse && animGedAliveAtCutoff(spouse)) return animGedFullDisplayName(spouse);
+    }
+    return null;
 }
 
 function animGedSelectIndividual(id) {
@@ -4049,7 +4090,7 @@ function animGedSelectIndividual(id) {
     document.getElementById('animJson').value = JSON.stringify(animData, null, 2);
     document.getElementById('animGedResults').innerHTML = '';
     const birthYearMatch = String(main.birt || '').match(/\d{4}/);
-    const displayName = main.name.replace(/\//g, ' ').trim();
+    const displayName = animGedFullDisplayName(main);
     document.getElementById('animGedSearch').value = birthYearMatch ? `${displayName} - ${birthYearMatch[0]}` : displayName;
     document.getElementById('animStage').classList.remove('show');
     document.getElementById('animStage').innerHTML = '';
