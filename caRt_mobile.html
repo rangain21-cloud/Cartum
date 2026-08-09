@@ -429,6 +429,9 @@
             min-width: 280px; min-height: 220px;
             resize: both;
         }
+        #animModal .modal-title {
+            cursor: move; user-select: none; -webkit-user-select: none;
+        }
         #animIndiModal .modal-box {
             max-width: 420px; max-height: 85vh; overflow-y: auto;
         }
@@ -441,9 +444,13 @@
         #animModal input[type="text"] {
             width: 100%; box-sizing: border-box;
         }
+        /* Fonds distincts du fond de la modale, pour bien repérer les champs saisissables */
+        #animModal .search-input {
+            background: var(--bg-dark);
+        }
         .anim-cutoff-date {
             display: inline-block; width: auto; padding: 2px 6px;
-            background: var(--bg-panel); border: 1px solid var(--border);
+            background: var(--bg-dark); border: 1px solid var(--border);
             border-radius: 6px; color: var(--text); font-size: 0.85rem;
             font-family: inherit; vertical-align: middle; color-scheme: dark;
         }
@@ -950,7 +957,7 @@
         </div>
 
         <label class="anim-field-label">1. Fichier GEDCOM (.ged) — recommandé</label>
-        <label class="btn btn-primary btn-full" style="text-align:center;display:block">
+        <label class="btn btn-primary" style="text-align:center;display:inline-block">
             📁 Charger un fichier .ged
             <input type="file" id="animGedInput" accept=".ged,.gedcom,text/plain" style="display:none" onchange="animLoadGedFile(this)">
         </label>
@@ -1035,7 +1042,12 @@
         </div>
         <p class="anim-hint" style="margin-top:4px">Relancez l'animation pour appliquer un changement de taille des portraits.</p>
 
-        <button class="btn btn-success btn-full" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
+        <div style="text-align:center">
+            <button class="btn btn-success" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
+        </div>
+        <div style="text-align:center">
+            <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="animReset()">🔄 Réinitialiser l'animation</button>
+        </div>
 
         <div id="animPreview"></div>
         <div id="animStage"></div>
@@ -3569,6 +3581,9 @@ function animAgeAtCutoff(naissance) {
 
 function openAnimModal() {
     document.getElementById('animModal').classList.add('open');
+    // Repart d'une position et d'une taille par défaut (centrée) à chaque ouverture,
+    // même si l'utilisateur avait déplacé/redimensionné la modale la fois précédente.
+    document.querySelector('#animModal .modal-box').removeAttribute('style');
     animMapPopulateDatalists();
     // Préremplit avec le lot actuellement sélectionné sur la carte, s'il y en a un
     if (currentIdLot && csvData) {
@@ -3583,6 +3598,105 @@ function openAnimModal() {
 function closeAnimModal() {
     document.getElementById('animModal').classList.remove('open');
 }
+
+// Réinitialise entièrement le formulaire d'animation (individu, proches, fond de scène,
+// zooms, date de coupure...) pour permettre de repartir de zéro avec de nouveaux choix.
+function animReset() {
+    animData = null;
+    animGed = null;
+    animGedLastSelectedId = null;
+    animBgImage = null;
+    animPendingPortrait = null;
+    animBgZoom = 1;
+    animAvatarZoom = 1;
+
+    document.getElementById('animCutoffDate').value = ANIM_DEATH_CUTOFF_DEFAULT_ISO;
+
+    document.getElementById('animGedInput').value = '';
+    document.getElementById('animGedStatus').textContent = '';
+    document.getElementById('animGedSearchBlock').style.display = 'none';
+    document.getElementById('animGedSearch').value = '';
+    document.getElementById('animGedResults').innerHTML = '';
+
+    document.getElementById('animId').value = '';
+    document.getElementById('animJson').value = '';
+
+    document.getElementById('animPortraitInput').value = '';
+    document.getElementById('animPortraitPreviewImg').style.display = 'none';
+    document.getElementById('animPortraitClearBtn').style.display = 'none';
+
+    document.getElementById('animMapProprio').value = '';
+    document.getElementById('animMapLot').value = '';
+    animMapPopulateDatalists();
+
+    document.getElementById('animBgImgInput').value = '';
+    document.getElementById('animBgImgPreview').style.display = 'none';
+    document.getElementById('animBgImgClearBtn').style.display = 'none';
+
+    document.getElementById('animBgZoomRange').value = 1;
+    document.getElementById('animBgZoomVal').textContent = '1.00×';
+    document.getElementById('animAvatarZoomRange').value = 1;
+    document.getElementById('animAvatarZoomVal').textContent = '1.00×';
+
+    document.getElementById('animPreview').innerHTML = '';
+    const stage = document.getElementById('animStage');
+    stage.classList.remove('show');
+    stage.innerHTML = '';
+
+    document.getElementById('animLaunchBtn').disabled = true;
+
+    toast('Animation réinitialisée : faites de nouveaux choix.');
+}
+
+// ── Déplacement de la modale Animation (glisser depuis le titre) ─────────
+// Le redimensionnement est déjà permis par CSS (resize: both). On ajoute ici la
+// possibilité de déplacer la fenêtre en la faisant glisser par sa barre de titre,
+// à la souris comme au doigt (tactile).
+(function initAnimModalDrag() {
+    const box = document.querySelector('#animModal .modal-box');
+    const handle = document.querySelector('#animModal .modal-title');
+    if (!box || !handle) return;
+
+    let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+    function onDown(e) {
+        dragging = true;
+        const p = e.touches ? e.touches[0] : e;
+        const rect = box.getBoundingClientRect();
+        startX = p.clientX; startY = p.clientY;
+        startLeft = rect.left; startTop = rect.top;
+        // Détache la modale du centrage automatique pour pouvoir la positionner librement
+        box.style.position = 'fixed';
+        box.style.margin = '0';
+        box.style.left = startLeft + 'px';
+        box.style.top = startTop + 'px';
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchend', onUp);
+    }
+    function onMove(e) {
+        if (!dragging) return;
+        if (e.cancelable) e.preventDefault();
+        const p = e.touches ? e.touches[0] : e;
+        const margin = 24;
+        let newLeft = startLeft + (p.clientX - startX);
+        let newTop = startTop + (p.clientY - startY);
+        newLeft = Math.min(Math.max(newLeft, margin - box.offsetWidth), window.innerWidth - margin);
+        newTop = Math.min(Math.max(newTop, 0), window.innerHeight - margin);
+        box.style.left = newLeft + 'px';
+        box.style.top = newTop + 'px';
+    }
+    function onUp() {
+        dragging = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchend', onUp);
+    }
+    handle.addEventListener('mousedown', onDown);
+    handle.addEventListener('touchstart', onDown, { passive: true });
+})();
 
 // Remplit les suggestions IdProprio (tous) et IdLot (filtrés par le propriétaire choisi)
 function animMapPopulateDatalists() {
