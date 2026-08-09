@@ -441,6 +441,13 @@
         #animModal input[type="text"] {
             width: 100%; box-sizing: border-box;
         }
+        .anim-cutoff-date {
+            display: inline-block; width: auto; padding: 2px 6px;
+            background: var(--bg-panel); border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text); font-size: 0.85rem;
+            font-family: inherit; vertical-align: middle; color-scheme: dark;
+        }
+        .anim-cutoff-date:focus { outline: none; border-color: var(--accent); }
         .anim-field-label { font-size: 0.78rem; color: var(--text-muted); margin: 10px 0 4px; display: block; }
         .anim-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
         .anim-person-preview {
@@ -937,7 +944,9 @@
         <div class="modal-title">🚶 Animation — Population</div>
         <div class="modal-body" style="margin-bottom:8px">
             Fait « marcher » un individu, accompagné de son conjoint et de ses enfants
-            encore en vie (décès vide ou postérieur au 31/12/1809, et déjà nés à cette date).
+            encore en vie (décès vide ou postérieur au
+            <input type="date" id="animCutoffDate" class="anim-cutoff-date" value="1809-12-31" onchange="animCutoffDateChanged()">
+            , et déjà nés à cette date).
         </div>
 
         <label class="anim-field-label">1. Fichier GEDCOM (.ged) — recommandé</label>
@@ -985,7 +994,7 @@
 
         <label class="anim-field-label">Données (JSON)</label>
         <textarea id="animJson" placeholder='{"prenom":"Jean","portrait":"https://...jpg","relations":[{"prenom":"Marie","nom":"Dupont","naissance":"1780-04-12","portrait":"https://...jpg","relation":"conjoint","deces":""},{"prenom":"Paul","nom":"Dupont","naissance":"1802-11-03","portrait":"https://...jpg","relation":"enfant","deces":"1830-05-02"}]}'></textarea>
-        <p class="anim-hint" style="margin-top:4px">Champs optionnels par proche : "nom" et "naissance" (année suffit) permettent d'afficher nom + âge en 1809.</p>
+        <p class="anim-hint" style="margin-top:4px">Champs optionnels par proche : "nom" et "naissance" (année suffit) permettent d'afficher nom + âge à la date choisie ci-dessus.</p>
 
         <div style="display:flex;gap:8px;margin-top:8px">
             <button class="btn btn-primary" style="flex:1" onclick="animParseAndLoad()">📥 Charger le JSON</button>
@@ -3498,7 +3507,36 @@ async function openPopulation() {
 // classique ci-dessus qui se contente d'ouvrir la fiche dans un nouvel onglet.
 // L'utilisateur colle donc ici le portrait/prénom de l'individu sélectionné et
 // de ses proches (JSON), et l'appli filtre les vivants puis lance leur marche.
-const ANIM_DEATH_CUTOFF = new Date('1809-12-31T23:59:59');
+const ANIM_DEATH_CUTOFF_DEFAULT_ISO = '1809-12-31'; // valeur de repli si le champ date est vide/illisible
+
+// Lit le champ date de la modale (paramètre "date" de la carte pour l'animation) et le
+// renvoie sous différentes formes utiles. Toutes les fonctions ci-dessous s'appuient sur
+// ces helpers plutôt que sur une date codée en dur, afin que changer le champ recalcule
+// aussitôt qui est vivant/né à cette date.
+function animGetCutoffISO() {
+    const el = document.getElementById('animCutoffDate');
+    const v = el && el.value ? el.value : '';
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ANIM_DEATH_CUTOFF_DEFAULT_ISO;
+}
+function animGetCutoffDate() {
+    return new Date(animGetCutoffISO() + 'T23:59:59');
+}
+function animGetCutoffYear() {
+    return parseInt(animGetCutoffISO().slice(0, 4), 10);
+}
+function animGetCutoffFR() {
+    const [y, m, d] = animGetCutoffISO().split('-');
+    return `${d}/${m}/${y}`;
+}
+// Appelé quand l'utilisateur change la date dans la modale : recalcule la sélection
+// (proches vivants et déjà nés à cette date) sans rien avoir à ressaisir.
+function animCutoffDateChanged() {
+    if (animGed && animGedLastSelectedId) {
+        animGedSelectIndividual(animGedLastSelectedId);
+    } else if (animData) {
+        animRenderPreview();
+    }
+}
 let animData = null;
 let animBgZoom = 1;       // facteur d'agrandissement du fond de scène (carte ou image), cadré à droite
 let animAvatarZoom = 1;   // facteur d'agrandissement des portraits des individus
@@ -3509,22 +3547,24 @@ function animEsc(s) {
     ));
 }
 
-// Vivant si date de décès vide, ou strictement postérieure au 31/12/1809
+// Vivant si date de décès vide, ou strictement postérieure à la date de coupure choisie
 function animIsAlive(deces) {
     if (!deces || !String(deces).trim()) return true;
     const d = new Date(deces);
     if (isNaN(d.getTime())) return true; // date non reconnue -> on ne l'exclut pas
-    return d > ANIM_DEATH_CUTOFF;
+    return d > animGetCutoffDate();
 }
 
-// Âge en 1809 (à partir de la seule année de naissance, suffisant pour un âge approximatif)
-function animAgeIn1809(naissance) {
+// Âge à la date de coupure choisie (à partir de la seule année de naissance, suffisant
+// pour un âge approximatif)
+function animAgeAtCutoff(naissance) {
     if (!naissance) return null;
     const m = String(naissance).match(/(\d{4})/);
     if (!m) return null;
     const birthYear = parseInt(m[1], 10);
-    if (birthYear > 1809) return null; // pas encore né en 1809
-    return 1809 - birthYear;
+    const cutoffYear = animGetCutoffYear();
+    if (birthYear > cutoffYear) return null; // pas encore né à la date de coupure
+    return cutoffYear - birthYear;
 }
 
 function openAnimModal() {
@@ -3615,6 +3655,7 @@ function animClearPortrait() {
 // était encore en vie au 31/12/1809 — sans jamais avoir à saisir de JSON à la main.
 const ANIM_GED_MONTHS = { JAN:'01', FEB:'02', MAR:'03', APR:'04', MAY:'05', JUN:'06', JUL:'07', AUG:'08', SEP:'09', OCT:'10', NOV:'11', DEC:'12' };
 let animGed = null; // { individuals: Map(id -> {...}), families: Map(id -> {...}) }
+let animGedLastSelectedId = null; // id du dernier individu sélectionné, pour recalcul si la date change
 
 // Convertit une date GEDCOM ("16 MAY 1756", "ABT 1830", "1756"...) en "YYYY-MM-DD" (ou '' si illisible)
 function animGedDateToISO(raw) {
@@ -3839,13 +3880,13 @@ function animGedDoSearch() {
 // tort un enfant qui pourrait très bien être né avant la coupure.
 const ANIM_APPROX_TOLERANCE_YEARS = 5;
 function animGedAliveAtCutoff(p) {
-    const cutoffISO = '1809-12-31';
+    const cutoffISO = animGetCutoffISO();
     const birt = animGedDateToISO(p.birt);
     const deat = animGedDateToISO(p.deat);
     if (birt && birt > cutoffISO) {
         if (!animGedDateIsApprox(p.birt)) return false; // pas encore né (date certaine)
         const birthYear = parseInt(birt.slice(0, 4), 10);
-        if (!isNaN(birthYear) && birthYear - 1809 > ANIM_APPROX_TOLERANCE_YEARS) return false; // trop tardif même avec la marge
+        if (!isNaN(birthYear) && birthYear - animGetCutoffYear() > ANIM_APPROX_TOLERANCE_YEARS) return false; // trop tardif même avec la marge
     }
     if (deat && deat <= cutoffISO) return false; // déjà décédé
     return true;
@@ -3855,6 +3896,7 @@ function animGedSelectIndividual(id) {
     const { individuals, families } = animGed;
     const main = individuals.get(id);
     if (!main) return;
+    animGedLastSelectedId = id;
 
     const relations = [];
     for (const famId of main.fams) {
@@ -3898,7 +3940,7 @@ function animGedSelectIndividual(id) {
     document.getElementById('animStage').innerHTML = '';
     document.getElementById('animLaunchBtn').disabled = false;
     animRenderPreview();
-    toast(`${relations.length} proche(s) encore en vie en 1809 trouvé(s) pour ${animGedGivenName(main.name)}.`);
+    toast(`${relations.length} proche(s) encore en vie en ${animGetCutoffYear()} trouvé(s) pour ${animGedGivenName(main.name)}.`);
 }
 
 // Ouvre la fiche Geneanet de l'individu (même base que "Rechercher dans l'arbre")
@@ -3980,9 +4022,9 @@ function animParseAndLoad() {
 }
 
 function animRelRowHtml(r, idx, cssClass, tagLabel) {
-    const age = animAgeIn1809(r.naissance);
+    const age = animAgeAtCutoff(r.naissance);
     const fullName = [r.prenom, r.nom].filter(Boolean).join(' ');
-    const ageTxt = age != null ? `, ${age} an${age > 1 ? 's' : ''} en 1809` : '';
+    const ageTxt = age != null ? `, ${age} an${age > 1 ? 's' : ''} en ${animGetCutoffYear()}` : '';
     return `<div class="anim-rel-row">
         <img id="animRelAvatar_${idx}" class="anim-avatar ${cssClass}" src="${animEsc(r.portrait || '')}" onerror="this.style.opacity=0.3">
         <div class="anim-rel-name">
@@ -4027,7 +4069,7 @@ function animRenderPreview() {
             children.map(c => animRelRowHtml(c, c.idx, 'enfant', 'Enfant')).join('');
     }
     if (!spouses.length && !children.length) {
-        html += `<p class="anim-hint">Aucun proche encore en vie (décès vide ou postérieur au 31/12/1809) dans les données fournies.</p>`;
+        html += `<p class="anim-hint">Aucun proche encore en vie (décès vide ou postérieur au ${animGetCutoffFR()}) dans les données fournies.</p>`;
     }
     document.getElementById('animPreview').innerHTML = html;
 }
@@ -4259,7 +4301,7 @@ function animLaunch() {
     const PER_YEAR_DELAY = 0.35;     // secondes de retard supplémentaire par année d'écart d'âge
     const childRowXOffset = avatarPx; // décalage garanti par la marge réservée plus haut (aucun risque de dépasser les bords), agrandi pour éviter tout chevauchement visuel avec la ligne principale
 
-    const childrenWithAge = children.map(c => ({ ...c, age: animAgeIn1809(c.naissance) }));
+    const childrenWithAge = children.map(c => ({ ...c, age: animAgeAtCutoff(c.naissance) }));
     const knownAges = childrenWithAge.map(c => c.age).filter(a => a != null);
     const maxAge = knownAges.length ? Math.max(...knownAges) : null;
     // Tri par date de naissance exacte (plus ancienne d'abord) plutôt que par âge arrondi à l'année,
@@ -4305,12 +4347,12 @@ function animFallbackEvents(person) {
 
 function animShowIndiModal(person) {
     const fullName = [person.prenom, person.nom].filter(Boolean).join(' ') || person.prenom || '(sans nom)';
-    const age = animAgeIn1809(person.naissance);
+    const age = animAgeAtCutoff(person.naissance);
     let html = `<div class="anim-indi-header">
         <img src="${animEsc(person.portrait || '')}" onerror="this.style.opacity=0.3">
         <div>
             <div style="font-weight:700;font-size:1.05rem">${animEsc(fullName)}</div>
-            ${age != null ? `<div style="font-size:0.8rem;color:var(--text-muted)">${age} an${age > 1 ? 's' : ''} en 1809</div>` : ''}
+            ${age != null ? `<div style="font-size:0.8rem;color:var(--text-muted)">${age} an${age > 1 ? 's' : ''} en ${animGetCutoffYear()}</div>` : ''}
         </div>
     </div>`;
 
