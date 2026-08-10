@@ -1027,14 +1027,14 @@
         </div>
         <p class="anim-hint" style="margin-top:4px">Une image choisie ici remplace la carte comme fond de la scène.</p>
 
+        <div id="animPreview"></div>
+
         <div style="text-align:center">
             <button class="btn btn-success" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
         </div>
         <div style="text-align:center">
             <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="animReset()">🔄 Réinitialiser l'animation</button>
         </div>
-
-        <div id="animPreview"></div>
 
         <label class="anim-field-label" style="margin-top:10px">Taille du fond de scène (cadré à gauche)</label>
         <div style="display:flex;align-items:center;gap:10px">
@@ -1272,6 +1272,61 @@
      JAVASCRIPT
 ═══════════════════════════════════════════════════ -->
 <script>
+// ── GARDE BOUTON RETOUR ANDROID ───────────────────────
+// Piège la touche Retour matérielle/gestuelle Android : la première
+// pression ferme une éventuelle modale ouverte ou demande confirmation
+// avant de vraiment quitter/reculer dans l'appli.
+// Placé tout en premier dans le script (avant tout autre code) et protégé par
+// try/catch : ainsi, même si une erreur JS survient plus loin dans le fichier
+// au chargement, le piège reste posé et la confirmation « Voulez-vous quitter
+// Cartum ? » continue de s'afficher au lieu de laisser l'appli se fermer sans
+// prévenir (avec perte de la saisie en cours).
+(function () {
+    let exiting = false;
+
+    function armBackGuard() {
+        try { history.pushState({ cartumBackGuard: true }, '', location.href); }
+        catch (e) { /* environnement restreint (ex: file://) : rien à faire de plus */ }
+    }
+    armBackGuard(); // pose une entrée d'historique "piège" au chargement
+
+    window.addEventListener('popstate', () => {
+        if (exiting) return; // on laisse la navigation réelle se dérouler
+
+        try {
+            const openModal = document.querySelector('.modal.open, #imgModal.open');
+            if (openModal) {
+                const wasIndiModal = openModal.id === 'animIndiModal';
+                openModal.classList.remove('open');
+                // animResumeAnimation peut ne pas encore exister si le reste du script n'a
+                // pas fini de se charger ; on l'appelle seulement si elle est disponible.
+                if (wasIndiModal && typeof animResumeAnimation === 'function') animResumeAnimation();
+                armBackGuard(); // on réarme le piège pour la prochaine pression
+                return;
+            }
+
+            if (typeof confirm2 === 'function') {
+                confirm2(
+                    'Voulez-vous quitter Cartum ?',
+                    () => {
+                        exiting = true;
+                        history.back(); // confirmé : le retour devient opérationnel
+                    },
+                    () => {
+                        armBackGuard(); // annulé : on réarme le piège
+                    }
+                );
+            } else {
+                // Repli de sécurité si confirm2 n'est pas encore disponible : on réarme
+                // quand même le piège plutôt que de laisser l'appli se fermer sans rien dire.
+                armBackGuard();
+            }
+        } catch (e) {
+            armBackGuard(); // en cas d'erreur imprévue, on réarme plutôt que de laisser passer
+        }
+    });
+})();
+
 // ── STATE ──────────────────────────────────────────
 let svgData = null, csvData = null, currentSvg = null, svgWrapper = null;
 let originalCsvFileName = null;
@@ -1424,8 +1479,10 @@ function closeAideOverlay() {
     // poignée native (coin bas-droit) — pour ne pas écraser sa taille au réouverture
     // (on ignore le déclenchement initial du ResizeObserver, qui a lieu même overlay fermé)
     const overlay = document.getElementById('aideOverlay');
-    new ResizeObserver(() => { if (overlay.style.display === 'block') win.dataset.userAdjusted = '1'; })
-        .observe(win);
+    if (typeof ResizeObserver === 'function') {
+        new ResizeObserver(() => { if (overlay.style.display === 'block') win.dataset.userAdjusted = '1'; })
+            .observe(win);
+    }
 })();
 
 // ── DRAWER (kept for back-compat refs) ─────────────
@@ -4595,42 +4652,7 @@ document.getElementById('animIndiModal').addEventListener('click', e => {
     if (e.target === e.currentTarget) animCloseIndiModal();
 });
 
-// ── GARDE BOUTON RETOUR ANDROID ───────────────────────
-// Piège la touche Retour matérielle/gestuelle Android : la première
-// pression ferme une éventuelle modale ouverte ou demande confirmation
-// avant de vraiment quitter/reculer dans l'appli.
-(function () {
-    let exiting = false;
-
-    function armBackGuard() {
-        history.pushState({ cartumBackGuard: true }, '', location.href);
-    }
-    armBackGuard(); // pose une entrée d'historique "piège" au chargement
-
-    window.addEventListener('popstate', () => {
-        if (exiting) return; // on laisse la navigation réelle se dérouler
-
-        const openModal = document.querySelector('.modal.open, #imgModal.open');
-        if (openModal) {
-            const wasIndiModal = openModal.id === 'animIndiModal';
-            openModal.classList.remove('open');
-            if (wasIndiModal) animResumeAnimation(); // la touche Retour ferme la fiche : on relance la marche
-            armBackGuard(); // on réarme le piège pour la prochaine pression
-            return;
-        }
-
-        confirm2(
-            'Voulez-vous quitter Cartum ?',
-            () => {
-                exiting = true;
-                history.back(); // confirmé : le retour devient opérationnel
-            },
-            () => {
-                armBackGuard(); // annulé : on réarme le piège
-            }
-        );
-    });
-})();
+// ── GARDE BOUTON RETOUR ANDROID (voir tout en haut du script) ─
 
 // ── INIT ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
