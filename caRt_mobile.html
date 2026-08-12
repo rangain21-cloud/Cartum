@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>Cartum – Carte interactive</title>
     <!-- Google API client + Google Identity Services -->
-    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script>
         /* @license Papa Parse v5.4.1 https://github.com/mholt/PapaParse License: MIT */
@@ -1325,6 +1325,72 @@
             armBackGuard(); // en cas d'erreur imprévue, on réarme plutôt que de laisser passer
         }
     });
+})();
+
+// ── PWA HORS-LIGNE (manifeste + service worker, 100% intégrés au fichier) ──
+// Objectif : rendre l'appli indépendante d'Internet après une première visite réussie.
+// Une fois cette page chargée une fois avec succès, le service worker met en cache toutes
+// les ressources demandées (cette page, les scripts Google optionnels...) et les ressert
+// depuis le cache si le réseau échoue ou est trop lent (ex: GitHub Pages injoignable,
+// ERR_TIMED_OUT) — l'appli reste utilisable hors-ligne ou en cas d'indisponibilité du site.
+(function initOfflinePwa() {
+    try {
+        // Manifeste minimal, généré en mémoire (pas de fichier manifest.json séparé à héberger),
+        // pour permettre "Ajouter à l'écran d'accueil" sur Android en mode application autonome.
+        const manifest = {
+            name: 'Cartum',
+            short_name: 'Cartum',
+            start_url: location.pathname + location.search,
+            scope: './',
+            display: 'standalone',
+            background_color: '#1a2332',
+            theme_color: '#1a2332'
+        };
+        const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+        const manifestLink = document.createElement('link');
+        manifestLink.rel = 'manifest';
+        manifestLink.href = URL.createObjectURL(manifestBlob);
+        document.head.appendChild(manifestLink);
+    } catch (e) { /* pas bloquant si le manifeste ne peut pas être généré */ }
+
+    if (!('serviceWorker' in navigator)) return; // ex: contexte http:// non sécurisé, ou navigateur trop ancien
+
+    // Le service worker est écrit ici sous forme de texte et enregistré via une URL Blob :
+    // cela évite d'avoir à héberger un fichier .js séparé sur GitHub Pages, tout en gardant
+    // caRt_mobile.html totalement autonome.
+    const SW_SOURCE = `
+        const CACHE_NAME = 'cartum-offline-v1';
+        self.addEventListener('install', () => self.skipWaiting());
+        self.addEventListener('activate', (e) => {
+            self.clients.claim();
+            e.waitUntil(
+                caches.keys().then((keys) => Promise.all(
+                    keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+                ))
+            );
+        });
+        self.addEventListener('fetch', (e) => {
+            if (e.request.method !== 'GET') return; // ne met en cache que les lectures
+            e.respondWith(
+                fetch(e.request).then((res) => {
+                    const resClone = res.clone();
+                    caches.open(CACHE_NAME).then((cache) => cache.put(e.request, resClone)).catch(() => {});
+                    return res;
+                }).catch(() => caches.match(e.request))
+            );
+        });
+    `;
+    try {
+        const swBlob = new Blob([SW_SOURCE], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(swBlob);
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {
+                // échec silencieux : l'appli continue de fonctionner normalement, simplement
+                // sans mise en cache hors-ligne (ex: certains navigateurs restreignent les
+                // service workers enregistrés depuis une URL Blob)
+            });
+        });
+    } catch (e) { /* pas bloquant */ }
 })();
 
 // ── STATE ──────────────────────────────────────────
