@@ -1556,9 +1556,18 @@ function toggleDrawer() { toggleSidebar(); }
 function closeDrawer()  { /* no-op in split layout */ }
 
 function toggleSection(id) {
-    document.getElementById(id).classList.toggle('expanded');
-    if (id === 'sec-population' && document.getElementById(id).classList.contains('expanded')) {
+    const isExpanded = document.getElementById(id).classList.toggle('expanded');
+    if (id === 'sec-population' && isExpanded) {
         popStatsRefresh();   // affiche Total/Proprio à l'ouverture, avec les valeurs déjà stockées dans le csv
+    }
+    if (id === 'sec-filter' && isExpanded) {
+        // Anticipe l'affichage de la liste des propriétaires dès l'ouverture du
+        // pavé, avec le tri "Id" par défaut, au lieu d'attendre que l'utilisateur
+        // clique sur "Id" / "Nb lots" (ce qui donnait l'impression d'un temps de
+        // réponse long après le choix du tri).
+        if (!document.getElementById('proprioChecklist').hasChildNodes()) {
+            setSortMode('id');
+        }
     }
 }
 
@@ -2220,10 +2229,17 @@ function setSortMode(m) {
     populateProprioFilter();
 }
 
-function populateProprioFilter() {
-    const container = document.getElementById('proprioChecklist');
-    container.innerHTML = '';
-    if (!csvData) return;
+// Cache des statistiques par propriétaire (coûteuses à calculer : un parcours
+// complet du CSV). Le cache n'est invalidé que si la référence de csvData change
+// (nouveau chargement CSV/Drive), pas à chaque changement de tri : changer de tri
+// ne fait alors que re-trier un tableau déjà calculé, au lieu de tout reparcourir.
+let _proprioStatsCache = null;
+let _proprioStatsCacheCsv = null;
+
+function computeProprioStats() {
+    if (csvData && csvData === _proprioStatsCacheCsv && _proprioStatsCache) {
+        return _proprioStatsCache;
+    }
     // Le compteur doit refléter TOUS les IdLot du CSV pour chaque IdProprio,
     // pas seulement ceux ayant un élément SVG correspondant sur la carte.
     // On utilise un Set d'IdLot par propriétaire pour éviter de compter deux
@@ -2238,7 +2254,17 @@ function populateProprioFilter() {
             if (!stats[r.IdProprio].famille && r.Famille) stats[r.IdProprio].famille = r.Famille;
         }
     });
-    let arr = Object.entries(stats).map(([id, v]) => ({ id, famille: v.famille, count: v.lots.size }));
+    const arr = Object.entries(stats).map(([id, v]) => ({ id, famille: v.famille, count: v.lots.size }));
+    _proprioStatsCache = arr;
+    _proprioStatsCacheCsv = csvData;
+    return arr;
+}
+
+function populateProprioFilter() {
+    const container = document.getElementById('proprioChecklist');
+    container.innerHTML = '';
+    if (!csvData) return;
+    let arr = computeProprioStats().slice();
     if (sortMode === 'count') arr.sort((a, b) => b.count - a.count);
     else arr.sort((a, b) => (parseInt(a.id) || 0) - (parseInt(b.id) || 0));
     arr.forEach(p => {
