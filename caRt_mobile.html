@@ -2531,6 +2531,24 @@ function _driveConnected() {
     document.getElementById('btnDriveSave').disabled = false;
     document.getElementById('btnDriveChangeFolder').disabled = false;
     toast('Google Drive connecté ✓');
+    prefetchDriveFileList();
+}
+
+// Anticipe, dès la connexion, la résolution du dossier "Cartum" et la liste de
+// son contenu — les deux allers-retours réseau qui précèdent normalement
+// l'affichage du sélecteur de fichiers dans driveLoad(). Ainsi, quand
+// l'utilisateur clique sur "Charger depuis Drive", le sélecteur peut s'ouvrir
+// immédiatement au lieu d'attendre ces requêtes.
+// N'agit que si un dossier est déjà mémorisé (allowPicker=false) : on ne veut
+// jamais ouvrir le sélecteur natif Google hors d'un geste utilisateur.
+let _driveListPrefetch = null;
+function prefetchDriveFileList() {
+    _driveListPrefetch = (async () => {
+        const folderId = await getOrCreateFolder(DRIVE_FOLDER, false);
+        const files = await listDriveFiles(folderId);
+        driveLog(`  (anticipation) dossier + liste prêts → ${files.map(f => f.name).join(', ') || 'vide'}`);
+        return { folderId, files };
+    })().catch(() => null); // best-effort : aucune erreur affichée à l'utilisateur
 }
 
 function driveLog(msg) {
@@ -2557,34 +2575,33 @@ async function driveLoad() {
     setDriveStatus('Recherche dans Drive…');
     driveLog(`driveLoad – résolution du dossier "${DRIVE_FOLDER}"…`);
     try {
-        // ── Étape 1 : résoudre le dossier Cartum (mémorisé ou choisi via le Picker) ──
-        let folderId;
-        try {
-            folderId = await getOrCreateFolder(DRIVE_FOLDER);
-        } catch (e) {
-            setDriveStatus(`Dossier "${DRIVE_FOLDER}" introuvable`, 'error');
-            driveLog(`  ✗ ${e.message}`);
-            toast(`Dossier "${DRIVE_FOLDER}" non sélectionné`);
-            return;
+        // ── Étapes 1 & 2 : dossier Cartum + liste de son contenu ──
+        // Si l'anticipation lancée à la connexion a déjà résolu ces deux appels
+        // réseau (cas le plus fréquent), on les réutilise directement — le
+        // sélecteur de fichiers peut alors s'afficher sans délai perceptible.
+        let folderId, files;
+        if (_driveListPrefetch) {
+            const pre = await _driveListPrefetch;
+            _driveListPrefetch = null;
+            if (pre) {
+                driveLog(`  driveLoad : réutilisation de l'anticipation (dossier + liste déjà prêts)`);
+                ({ folderId, files } = pre);
+            }
+        }
+        if (!folderId) {
+            try {
+                folderId = await getOrCreateFolder(DRIVE_FOLDER);
+            } catch (e) {
+                setDriveStatus(`Dossier "${DRIVE_FOLDER}" introuvable`, 'error');
+                driveLog(`  ✗ ${e.message}`);
+                toast(`Dossier "${DRIVE_FOLDER}" non sélectionné`);
+                return;
+            }
+            files = await listDriveFiles(folderId);
+            driveLog(`  Dossier id=${folderId} → ${files.map(f => f.name).join(', ') || 'vide'}`);
         }
 
-        // ── Étape 2 : lister le contenu du dossier (grâce au scope drive.readonly) ──
         let allSvgFiles = [], allCsvFiles = [];
-        const listParams = new URLSearchParams({
-            q: `'${folderId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`,
-            fields: 'files(id,name)', pageSize: '100'
-        });
-        const listR = await fetch(`https://www.googleapis.com/drive/v3/files?${listParams}`, {
-            headers: { Authorization: 'Bearer ' + driveToken }
-        });
-        if (!listR.ok) {
-            const errText = await listR.text().catch(() => '');
-            throw new Error(`files.list ${listR.status}: ${errText.slice(0, 200) || listR.statusText}`);
-        }
-        const listD = await listR.json();
-        const files = listD.files || [];
-        driveLog(`  Dossier id=${folderId} → ${files.map(f => f.name).join(', ') || 'vide'}`);
-
         files.forEach(f => {
             const lc = f.name.toLowerCase();
             if (lc.endsWith('.svg')) allSvgFiles.push(f);
@@ -2602,20 +2619,28 @@ async function driveLoad() {
         if (!chosen) { setDriveStatus('Chargement annulé', ''); return; }
 
         // ── Étape 4 : télécharger les fichiers choisis ─────────────
+        // Les deux téléchargements sont lancés EN PARALLÈLE (au lieu de l'un
+        // après l'autre) : c'est le levier le plus rentable ici, le SVG de la
+        // carte étant souvent volumineux et les deux requêtes ne dépendent pas
+        // l'une de l'autre. On ne les "consomme" (rendu carte / parsing CSV)
+        // qu'une fois les deux réponses arrivées, pour garder le même
+        // enchaînement mapElements()/populateProprioFilter() qu'auparavant.
+        if (chosen.svg) driveLog(`  Téléchargement SVG "${chosen.svg.name}"…`);
+        if (chosen.csv) driveLog(`  Téléchargement CSV "${chosen.csv.name}"…`);
+        const [svgText, csvText] = await Promise.all([
+            chosen.svg ? downloadDriveFile(chosen.svg.id) : Promise.resolve(null),
+            chosen.csv ? downloadDriveFile(chosen.csv.id) : Promise.resolve(null)
+        ]);
         if (chosen.svg) {
-            driveLog(`  Téléchargement SVG "${chosen.svg.name}"…`);
-            const text = await downloadDriveFile(chosen.svg.id);
-            svgData = text; driveFileIds.svg = chosen.svg.id;
+            svgData = svgText; driveFileIds.svg = chosen.svg.id;
             renderSvg();
-            driveLog(`  ✓ SVG chargé (${text.length} octets)`);
+            driveLog(`  ✓ SVG chargé (${svgText.length} octets)`);
             toast(`SVG chargé : ${chosen.svg.name}`);
         }
         if (chosen.csv) {
-            driveLog(`  Téléchargement CSV "${chosen.csv.name}"…`);
-            const text = await downloadDriveFile(chosen.csv.id);
             originalCsvFileName = chosen.csv.name; driveFileIds.csv = chosen.csv.id;
-            parseCsv(text);
-            driveLog(`  ✓ CSV chargé (${text.length} octets)`);
+            parseCsv(csvText);
+            driveLog(`  ✓ CSV chargé (${csvText.length} octets)`);
             toast(`CSV chargé : ${chosen.csv.name}`);
         }
         setDriveStatus(`✓ ${chosen.svg ? chosen.svg.name : '—'} / ${chosen.csv ? chosen.csv.name : '—'}`, 'connected');
@@ -3124,7 +3149,7 @@ async function searchDriveByType(ext) {
 // Mémoïsation du folderId pour éviter des appels répétés
 let _cachedFolderId = null;
 
-async function getOrCreateFolder(name) {
+async function getOrCreateFolder(name, allowPicker = true) {
     // Retourner le cache mémoire si disponible
     if (_cachedFolderId) {
         driveLog(`  getOrCreateFolder : cache mémoire → id=${_cachedFolderId}`);
@@ -3162,6 +3187,9 @@ async function getOrCreateFolder(name) {
 
     // Sous le scope drive.file, l'app ne peut plus retrouver un dossier par son nom :
     // il faut que l'utilisateur le désigne une fois via le sélecteur natif Google.
+    // (En mode anticipation/prefetch, allowPicker=false : on ne veut pas ouvrir
+    // un sélecteur natif sans geste utilisateur, on abandonne simplement.)
+    if (!allowPicker) throw new Error(`Aucun dossier "${name}" mémorisé`);
     driveLog(`  getOrCreateFolder : ouverture du sélecteur Google pour choisir "${name}"…`);
     const pickedId = await pickDriveFolder();
     if (!pickedId) throw new Error(`Aucun dossier "${name}" sélectionné`);
@@ -3283,6 +3311,7 @@ function driveChangeFolder() {
     localStorage.removeItem(DRIVE_IMAGES_FOLDER_ID_KEY);
     _cachedFolderId = null;
     _cachedImagesFolderId = null;
+    _driveListPrefetch = null; // le dossier va changer, l'anticipation précédente n'est plus valable
     driveFileIds = { svg: null, csv: null, visites: null };
     toast('Choisissez à nouveau votre dossier Cartum');
     driveLoad();
