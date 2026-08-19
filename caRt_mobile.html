@@ -427,41 +427,20 @@
         #animModal .modal-box {
             max-width: 96vw; max-height: 90vh; overflow: auto;
             min-width: 280px; min-height: 220px;
-            position: relative; box-sizing: border-box;
-            resize: none; /* remplacé par une poignée maison : voir .modal-resize-handle
-                              (resize natif non pris en charge sur mobile, et peu fiable sur PC) */
+            resize: both;
         }
         #animModal .modal-title {
             cursor: move; user-select: none; -webkit-user-select: none;
-            touch-action: none; /* empêche Safari/Chrome mobile d'interpréter le glisser comme un scroll de page */
         }
         #animIndiModal .modal-box {
             max-width: 96vw; max-height: 90vh; overflow: auto;
             min-width: 260px; min-height: 200px;
             width: 420px;
-            position: relative; box-sizing: border-box;
-            resize: none;
+            resize: both;
         }
         #animIndiModal .modal-title {
             cursor: move; user-select: none; -webkit-user-select: none;
-            touch-action: none;
         }
-        /* Poignée de redimensionnement maison (souris + tactile), commune aux deux
-           modales : le resize CSS natif n'est pas supporté sur mobile (Safari/Chrome
-           Android) et se montrait aussi peu fiable sur PC. */
-        .modal-resize-handle {
-            position: absolute; right: 3px; bottom: 3px;
-            width: 26px; height: 26px;
-            display: flex; align-items: flex-end; justify-content: flex-end;
-            padding: 4px;
-            cursor: nwse-resize;
-            color: var(--text-muted);
-            font-size: 15px; line-height: 1;
-            user-select: none; -webkit-user-select: none;
-            touch-action: none; /* empêche le scroll de la page pendant le geste tactile */
-            opacity: 0.6;
-        }
-        .modal-resize-handle:hover { opacity: 1; }
         #animModal textarea {
             width: 100%; box-sizing: border-box; min-height: 90px;
             background: var(--bg-dark); border: 1px solid var(--border);
@@ -3998,10 +3977,10 @@ function animReset() {
 }
 
 // ── Déplacement des modales redimensionnables (glisser depuis le titre) ──
-// On ajoute ici la possibilité de déplacer la fenêtre en la faisant glisser
-// par sa barre de titre, à la souris comme au doigt (tactile). Fonction
-// générique réutilisée pour #animModal (Animation — Population) et
-// #animIndiModal (Fiche de l'individu).
+// Le redimensionnement est déjà permis par CSS (resize: both). On ajoute ici la
+// possibilité de déplacer la fenêtre en la faisant glisser par sa barre de titre,
+// à la souris comme au doigt (tactile). Fonction générique réutilisée pour
+// #animModal (Animation — Population) et #animIndiModal (Fiche de l'individu).
 function initModalDrag(modalSelector) {
     const box = document.querySelector(`${modalSelector} .modal-box`);
     const handle = document.querySelector(`${modalSelector} .modal-title`);
@@ -4010,13 +3989,6 @@ function initModalDrag(modalSelector) {
     let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
 
     function onDown(e) {
-        // Sans ce preventDefault, le navigateur peut interpréter l'appui sur le
-        // texte du titre comme le début d'un glisser-déposer NATIF de texte (même
-        // avec user-select:none, certains navigateurs desktop l'engagent quand
-        // même), ce qui "vole" la souris avant que notre propre logique de
-        // glissement ne prenne la main — c'est ce qui empêchait le déplacement
-        // à la souris sur PC. Non applicable/needed en tactile (listener passif).
-        if (!e.touches) e.preventDefault();
         dragging = true;
         const p = e.touches ? e.touches[0] : e;
         const rect = box.getBoundingClientRect();
@@ -4056,65 +4028,6 @@ function initModalDrag(modalSelector) {
 }
 initModalDrag('#animModal');
 initModalDrag('#animIndiModal');
-
-// ── Redimensionnement des modales (poignée maison, souris + tactile) ─────
-// Le CSS "resize: both" natif n'est pas pris en charge par les navigateurs
-// mobiles (aucune poignée tactile n'existe nativement sur Safari/Chrome
-// Android) et se montrait par ailleurs peu fiable sur PC. On implémente donc
-// une poignée dessinée à la main, avec une logique de redimensionnement en JS
-// identique quel que soit l'appareil. Fonction générique réutilisée pour
-// #animModal et #animIndiModal.
-function initModalResize(modalSelector, minWidth, minHeight) {
-    const box = document.querySelector(`${modalSelector} .modal-box`);
-    if (!box) return;
-
-    const handleEl = document.createElement('div');
-    handleEl.className = 'modal-resize-handle';
-    handleEl.textContent = '◢';
-    handleEl.title = 'Glisser pour redimensionner';
-    box.appendChild(handleEl);
-
-    let resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
-
-    function onDown(e) {
-        if (!e.touches) e.preventDefault(); // voir remarque équivalente dans initModalDrag
-        resizing = true;
-        const p = e.touches ? e.touches[0] : e;
-        const rect = box.getBoundingClientRect();
-        startX = p.clientX; startY = p.clientY;
-        startW = rect.width; startH = rect.height;
-        // Fige explicitement la taille actuelle avant de la faire varier
-        box.style.width  = startW + 'px';
-        box.style.height = startH + 'px';
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('touchmove', onMove, { passive: false });
-        document.addEventListener('mouseup', onUp);
-        document.addEventListener('touchend', onUp);
-    }
-    function onMove(e) {
-        if (!resizing) return;
-        if (e.cancelable) e.preventDefault();
-        const p = e.touches ? e.touches[0] : e;
-        const margin = 16;
-        let newW = startW + (p.clientX - startX);
-        let newH = startH + (p.clientY - startY);
-        newW = Math.min(Math.max(newW, minWidth),  window.innerWidth  - margin);
-        newH = Math.min(Math.max(newH, minHeight), window.innerHeight - margin);
-        box.style.width  = newW + 'px';
-        box.style.height = newH + 'px';
-    }
-    function onUp() {
-        resizing = false;
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('touchmove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        document.removeEventListener('touchend', onUp);
-    }
-    handleEl.addEventListener('mousedown', onDown);
-    handleEl.addEventListener('touchstart', onDown, { passive: true });
-}
-initModalResize('#animModal', 280, 220);
-initModalResize('#animIndiModal', 260, 200);
 
 // Remplit les suggestions IdProprio (tous) et IdLot (filtrés par le propriétaire choisi)
 function animMapPopulateDatalists() {
