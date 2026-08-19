@@ -1428,6 +1428,7 @@ let sessionVisitCount = 0;
 
 // ── GOOGLE DRIVE – GIS TokenClient (popup sans redirect) ───────────
 let driveToken   = null;      // access_token actif
+let driveUserInfo = null;     // { emailAddress, displayName } du compte Google connecté (rempli par driveFetchUserInfo())
 let driveFileIds = { svg: null, csv: null, visites: null };
 const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.googleusercontent.com';   // ← votre Client ID OAuth2 ici
 // setAppId() est indispensable pour que l'accès drive.file soit réellement accordé
@@ -2625,6 +2626,26 @@ function _driveConnected() {
     document.getElementById('btnDriveChangeFolder').disabled = false;
     toast('Google Drive connecté ✓');
     prefetchDriveFileList();
+    driveFetchUserInfo();   // récupère (une fois) l'identité du compte Google connecté, pour l'historique Geneanet
+}
+
+// Récupère et met en cache l'identité (email + nom) du compte Google actuellement
+// connecté via Drive. Utilisé pour savoir QUI (quel utilisateur de l'appli) a
+// déclenché une visite Geneanet, en plus du user Geneanet recherché.
+async function driveFetchUserInfo() {
+    if (!driveToken) { driveUserInfo = null; return null; }
+    try {
+        const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+            headers: { Authorization: 'Bearer ' + driveToken }
+        });
+        const d = await r.json();
+        if (r.ok && d.user) {
+            driveUserInfo = { emailAddress: d.user.emailAddress || '', displayName: d.user.displayName || '' };
+        }
+    } catch (e) {
+        driveLog('driveFetchUserInfo : ' + e.message);
+    }
+    return driveUserInfo;
 }
 
 // Anticipe, dès la connexion, la résolution du dossier "Cartum" et la liste de
@@ -3732,8 +3753,13 @@ function isoWeekKey(date) {
 
 async function popRecordVisit(user) {
     if (!user || POP_EXCLUDED.includes(user.toLowerCase())) return;
+    // S'assure d'avoir l'identité du compte Google connecté avant d'enregistrer
+    // (utile si la connexion Drive vient d'avoir lieu et que driveUserInfo n'a
+    // pas encore été rempli par _driveConnected()).
+    if (driveToken && !driveUserInfo) await driveFetchUserInfo();
+    const loginUser = driveUserInfo?.emailAddress || driveUserInfo?.displayName || 'Non connecté (local)';
     const visits = await popVisitsLoad();   // dernière version connue (Drive si possible)
-    visits.push({ user, date: new Date().toISOString() });
+    visits.push({ user, date: new Date().toISOString(), loginUser });
     await popVisitsSave(visits);
     await popStatsRefresh();
 }
@@ -3751,14 +3777,18 @@ async function popStatsToggle() {
 
 async function popStatsRender() {
     const visits = await popVisitsLoad();
-    // Regroupe par semaine, puis par utilisateur -> nombre de visites (PC + Android confondus)
+    // Regroupe par semaine, puis par utilisateur Geneanet -> nombre de visites
+    // (PC + Android confondus), et mémorise pour chaque (semaine, user Geneanet)
+    // le détail des visites individuelles (date + compte Google connecté) pour
+    // pouvoir afficher "qui a fait la recherche" dans l'historique.
     const byWeek = {};
     visits.forEach(v => {
         if (!v.user || !v.user.trim()) return;
         const wk   = isoWeekKey(new Date(v.date));
         const user = v.user.toLowerCase().trim();
         if (!byWeek[wk]) byWeek[wk] = {};
-        byWeek[wk][user] = (byWeek[wk][user] || 0) + 1;
+        if (!byWeek[wk][user]) byWeek[wk][user] = [];
+        byWeek[wk][user].push(v);
     });
     const weeks = Object.keys(byWeek).sort().reverse();   // semaine décroissante
     const content = document.getElementById('popStatsContent');
@@ -3766,11 +3796,20 @@ async function popStatsRender() {
     content.innerHTML = weeks.map(wk => {
         const counts = byWeek[wk];
         const users  = Object.keys(counts).sort();
-        const detail = users.map(u => `${u}(${counts[u]})`).join(', ');
-        return `<div style="margin-bottom:6px">
+        const detail = users.map(u => {
+            const entries = counts[u];
+            // Détail par entrée : utilisateur Geneanet recherché + compte Google
+            // connecté ayant déclenché la recherche + heure de la visite.
+            const lines = entries.map(e => {
+                const login = e.loginUser || 'Non connecté (local)';
+                const time  = new Date(e.date).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+                return `<div style="padding-left:12px;color:var(--text-muted);font-size:0.74rem">↳ ${time} — connecté : <span style="color:#ddd">${login}</span></div>`;
+            }).join('');
+            return `<div style="margin-bottom:2px"><span style="color:#ddd">${u} (${entries.length})</span></div>${lines}`;
+        }).join('');
+        return `<div style="margin-bottom:10px">
             <span style="color:var(--accent3);font-weight:600">${wk}</span>
-            <span style="color:var(--text-muted)"> : </span>
-            <span style="color:#ddd">${detail}</span>
+            ${detail}
         </div>`;
     }).join('');
 }
