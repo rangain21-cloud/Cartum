@@ -1881,14 +1881,34 @@ function renderSvg() {
 }
 
 // ── ELEMENT MAPPING ─────────────────────────────────
+// Pour chaque élément SVG étiqueté, retrouve la ligne CSV correspondante.
+// Avant : jusqu'à 4 parcours linéaires (Array.find) du CSV COMPLET par élément
+// SVG, avec en plus une conversion String(r.IdLot) recalculée à chaque
+// comparaison — coût en O(éléments × lignes CSV), très pénalisant sur une
+// carte à plusieurs milliers de lots (c'est la principale cause du long temps
+// d'affichage constaté au chargement).
+// Maintenant : un index IdLot → ligne est construit UNE SEULE FOIS (O(lignes)),
+// ce qui rend les deux cas les plus fréquents (correspondance exacte, ou par
+// préfixe numérique) quasi instantanés (O(1) par élément). Les deux cas plus
+// rares (préfixe/sous-chaîne texte) gardent le parcours linéaire d'origine,
+// mais ne s'exécutent que pour les rares étiquettes qui n'ont pas trouvé de
+// correspondance directe — le comportement/résultat reste identique.
 function mapElements() {
     if (!currentSvg || !csvData) return;
     allSvgElements = [];
+
+    const byIdLot = new Map();
+    csvData.forEach(r => {
+        if (r.IdLot === undefined || r.IdLot === null) return;
+        const key = String(r.IdLot);
+        if (!byIdLot.has(key)) byIdLot.set(key, r); // garde la première ligne, comme .find() le ferait
+    });
+
     currentSvg.querySelectorAll('*[inkscape\\:label]').forEach(el => {
         const label = el.getAttribute('inkscape:label');
         if (!label) return;
-        let row = csvData.find(r => String(r.IdLot) === label);
-        if (!row) { const m = label.match(/^(\d+)/); if (m) row = csvData.find(r => String(r.IdLot) === m[1]); }
+        let row = byIdLot.get(label);
+        if (!row) { const m = label.match(/^(\d+)/); if (m) row = byIdLot.get(m[1]); }
         if (!row) row = csvData.find(r => r.IdLot && label.startsWith(r.IdLot));
         if (!row) row = csvData.find(r => r.IdLot && label.includes(r.IdLot));
         if (row) {
@@ -2272,6 +2292,9 @@ function populateProprioFilter() {
     let arr = computeProprioStats().slice();
     if (sortMode === 'count') arr.sort((a, b) => b.count - a.count);
     else arr.sort((a, b) => (parseInt(a.id) || 0) - (parseInt(b.id) || 0));
+    // Construction dans un DocumentFragment hors DOM, puis un seul appendChild
+    // final : évite un reflow par propriétaire (utile quand il y en a beaucoup).
+    const frag = document.createDocumentFragment();
     arr.forEach(p => {
         const isChecked = activeFilterProprios.has(p.id);
         const c = proprioColor(p.id);
@@ -2282,8 +2305,9 @@ function populateProprioFilter() {
             <span class="ms-swatch" style="background:${c.fill}"></span>
             <span>${escHtml(p.id)}${p.famille ? ' ' + escHtml(p.famille) : ''} — ${p.count} lot${p.count > 1 ? 's' : ''}</span>`;
         item.addEventListener('click', () => toggleProprioSelection(p.id));
-        container.appendChild(item);
+        frag.appendChild(item);
     });
+    container.appendChild(frag);
 }
 
 // Bascule un propriétaire dans/hors la sélection active et ré-applique le filtre
