@@ -1396,6 +1396,7 @@
 // ── STATE ──────────────────────────────────────────
 let svgData = null, csvData = null, currentSvg = null, svgWrapper = null;
 let originalCsvFileName = null;
+let originalSvgFileName = null;
 let allSvgElements = [];
 let commentsData = {};
 let currentIdLot = null;
@@ -1826,6 +1827,7 @@ function loadLocalSvg(input) {
     const reader = new FileReader();
     reader.onload = e => {
         svgData = e.target.result;
+        originalSvgFileName = file.name;
         renderSvg();
         setLocalStatus(`Carte chargée : ${file.name}`, 'ok');
     };
@@ -1873,6 +1875,9 @@ function renderSvg() {
         currentSvg.style.height = '100%';
         if (csvData) { mapElements(); populateProprioFilter(); }
     }
+    // Propose une date de coupure par défaut cohérente avec cette carte (voir
+    // animComputeDefaultCutoffISO), sauf si l'utilisateur a déjà personnalisé le champ.
+    animApplyDefaultCutoffDateIfUntouched();
 }
 
 // ── ELEMENT MAPPING ─────────────────────────────────
@@ -2633,6 +2638,7 @@ async function driveLoad() {
         ]);
         if (chosen.svg) {
             svgData = svgText; driveFileIds.svg = chosen.svg.id;
+            originalSvgFileName = chosen.svg.name;
             renderSvg();
             driveLog(`  ✓ SVG chargé (${svgText.length} octets)`);
             toast(`SVG chargé : ${chosen.svg.name}`);
@@ -3698,7 +3704,36 @@ async function openPopulation() {
 // classique ci-dessus qui se contente d'ouvrir la fiche dans un nouvel onglet.
 // L'utilisateur colle donc ici le portrait/prénom de l'individu sélectionné et
 // de ses proches (JSON), et l'appli filtre les vivants puis lance leur marche.
-const ANIM_DEATH_CUTOFF_DEFAULT_ISO = '1809-12-31'; // valeur de repli si le champ date est vide/illisible
+const ANIM_DEATH_CUTOFF_DEFAULT_ISO = '1809-12-31'; // valeur de repli si aucune année n'est trouvée dans le nom du fichier SVG
+
+// Extrait une année plausible (4 chiffres, "SSAA") du nom du fichier SVG de la
+// carte chargée (ex : "Commune_1809.svg" → "1809"), pour proposer une date de
+// coupure par défaut cohérente avec la carte affichée.
+function animExtractYearFromSvgFileName() {
+    if (!originalSvgFileName) return null;
+    const m = originalSvgFileName.match(/(1[5-9]\d{2}|20\d{2})/);
+    return m ? m[1] : null;
+}
+
+// Date de coupure par défaut souhaitée : 01/07 (JJ/MM) de l'année trouvée dans
+// le nom du fichier SVG de la carte, ou la valeur de repli si aucune année n'y
+// est trouvée (SVG pas encore chargé, ou nom de fichier sans année).
+function animComputeDefaultCutoffISO() {
+    const year = animExtractYearFromSvgFileName();
+    return year ? `${year}-07-01` : ANIM_DEATH_CUTOFF_DEFAULT_ISO;
+}
+
+// true tant que l'utilisateur n'a pas lui-même modifié le champ Date : dans ce
+// cas seulement, on peut réappliquer automatiquement le défaut calculé (ex :
+// après le chargement d'une nouvelle carte SVG en cours de session) sans
+// écraser un choix explicite.
+let _animCutoffUserEdited = false;
+
+function animApplyDefaultCutoffDateIfUntouched() {
+    if (_animCutoffUserEdited) return;
+    const el = document.getElementById('animCutoffDate');
+    if (el) el.value = animComputeDefaultCutoffISO();
+}
 
 // Lit le champ date de la modale (paramètre "date" de la carte pour l'animation) et le
 // renvoie sous différentes formes utiles. Toutes les fonctions ci-dessous s'appuient sur
@@ -3722,6 +3757,7 @@ function animGetCutoffFR() {
 // Appelé quand l'utilisateur change la date dans la modale : recalcule la sélection
 // (proches vivants et déjà nés à cette date) sans rien avoir à ressaisir.
 function animCutoffDateChanged() {
+    _animCutoffUserEdited = true;
     if (animGed && animGedLastSelectedId) {
         animGedSelectIndividual(animGedLastSelectedId);
     } else if (animData) {
@@ -3790,7 +3826,8 @@ function animReset() {
     animAvatarZoom = 1;
     animBaseAvatarPx = null;
 
-    document.getElementById('animCutoffDate').value = ANIM_DEATH_CUTOFF_DEFAULT_ISO;
+    document.getElementById('animCutoffDate').value = animComputeDefaultCutoffISO();
+    _animCutoffUserEdited = false;
 
     // Le fichier GEDCOM déjà chargé (animGed, l'input file et son statut) est conservé
     // en mémoire : seule la recherche/sélection d'individu est vidée pour permettre
