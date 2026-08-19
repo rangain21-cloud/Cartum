@@ -1696,6 +1696,40 @@ function applyXform() {
 const localImgCache = {};  // { "images/Prop1809_07.jpg": "blob:..." }  → images déjà téléchargées (local OU Drive)
 const driveImgIndex = {};  // { "images/prop1809_07.jpg": {id, mimeType} } → catalogue Drive, pas encore téléchargées
 
+// Limite le nombre d'images Drive conservées en mémoire (blob URL) en même
+// temps. Sans cela, précharger tout un dossier Images (qui peut contenir des
+// centaines de photos) peut consommer plusieurs centaines de Mo, voire plus
+// d'1 Go, au point de ralentir ou bloquer d'autres applications sur l'appareil
+// — c'est le cœur du problème signalé. Au-delà de cette limite, les images les
+// moins récemment consultées sont évincées (URL blob libérée) ; ce n'est pas
+// une perte définitive : elles seront simplement re-téléchargées à la demande
+// si on les rouvre (resolveImgSrcAsync), ce qui reste rapide.
+const MAX_CACHED_DRIVE_IMAGES = 40;
+const _imgMemory = new Map(); // entry.id -> { url, keys:[alias...], lastUsed }
+
+// Marque une image comme récemment utilisée : la Map JS conserve l'ordre
+// d'insertion, donc la ré-insérer en fin de Map suffit à en faire la plus
+// "récente" (la première entrée reste toujours la moins récemment utilisée).
+function _imgMemoryTouch(entryId) {
+    const rec = _imgMemory.get(entryId);
+    if (!rec) return;
+    _imgMemory.delete(entryId);
+    rec.lastUsed = Date.now();
+    _imgMemory.set(entryId, rec);
+}
+
+function _imgMemoryEvictIfNeeded() {
+    while (_imgMemory.size > MAX_CACHED_DRIVE_IMAGES) {
+        const oldestId = _imgMemory.keys().next().value; // le moins récemment utilisé
+        const rec = _imgMemory.get(oldestId);
+        _imgMemory.delete(oldestId);
+        if (rec) {
+            URL.revokeObjectURL(rec.url);
+            rec.keys.forEach(k => { if (localImgCache[k] === rec.url) delete localImgCache[k]; });
+        }
+    }
+}
+
 function loadLocalImgFolder(input) {
     const files = Array.from(input.files);
     if (!files.length) return;
@@ -1704,6 +1738,7 @@ function loadLocalImgFolder(input) {
     Object.values(localImgCache).forEach(url => URL.revokeObjectURL(url));
     Object.keys(localImgCache).forEach(k => delete localImgCache[k]);
     Object.keys(driveImgIndex).forEach(k => delete driveImgIndex[k]);
+    _imgMemory.clear(); // les blobs Drive référencés ci-dessus viennent d'être révoqués
 
     let count = 0;
     files.forEach(file => {
@@ -1728,11 +1763,19 @@ function loadLocalImgFolder(input) {
 function resolveImgSrc(src) {
     // Version synchrone (compatibilité) : ne renvoie que ce qui est déjà en cache.
     const key = src.toLowerCase();
-    if (localImgCache[key]) return localImgCache[key];
     const filename = src.split('/').pop().toLowerCase();
-    if (localImgCache[filename]) return localImgCache[filename];
     const noExt = filename.replace(/\.[^.]+$/, '');
-    if (localImgCache[noExt]) return localImgCache[noExt];
+    let hit = null, hitKey = null;
+    if (localImgCache[key])      { hit = localImgCache[key];      hitKey = key; }
+    else if (localImgCache[filename]) { hit = localImgCache[filename]; hitKey = filename; }
+    else if (localImgCache[noExt])    { hit = localImgCache[noExt];    hitKey = noExt; }
+    if (hit) {
+        // Une image Drive consultée est "réchauffée" : elle devient la moins
+        // susceptible d'être évincée par le plafond mémoire ci-dessus.
+        const entry = driveImgIndex[hitKey] || driveImgIndex[filename] || driveImgIndex[noExt] || driveImgIndex[key];
+        if (entry) _imgMemoryTouch(entry.id);
+        return hit;
+    }
     return src; // fallback : chemin original
 }
 
@@ -1765,10 +1808,15 @@ function downloadAndCacheDriveImg(entry) {
         const url = URL.createObjectURL(blob);
         const name = entry.name;
         const nameNoExt = name.replace(/\.[^.]+$/, '');
-        localImgCache[name.toLowerCase()]              = url;
-        localImgCache[nameNoExt.toLowerCase()]         = url;
-        localImgCache[`images/${name}`.toLowerCase()]  = url;
-        localImgCache[`images/${nameNoExt}`.toLowerCase()] = url;
+        const keys = [
+            name.toLowerCase(),
+            nameNoExt.toLowerCase(),
+            `images/${name}`.toLowerCase(),
+            `images/${nameNoExt}`.toLowerCase()
+        ];
+        keys.forEach(k => { localImgCache[k] = url; });
+        _imgMemory.set(entry.id, { url, keys, lastUsed: Date.now() });
+        _imgMemoryEvictIfNeeded(); // borne la mémoire totale utilisée par le cache d'images
         return url;
     })();
     _driveImgDownloadsInFlight[dedupeKey] = p;
@@ -3053,6 +3101,7 @@ async function loadImagesFromDrive() {
         Object.values(localImgCache).forEach(url => URL.revokeObjectURL(url));
         Object.keys(localImgCache).forEach(k => delete localImgCache[k]);
         Object.keys(driveImgIndex).forEach(k => delete driveImgIndex[k]);
+        _imgMemory.clear(); // les blobs Drive référencés ci-dessus viennent d'être révoqués
 
         // Indexation seule (pas de téléchargement) : quasi instantané, même
         // avec des centaines d'images.
