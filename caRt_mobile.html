@@ -433,7 +433,13 @@
             cursor: move; user-select: none; -webkit-user-select: none;
         }
         #animIndiModal .modal-box {
-            max-width: 420px; max-height: 85vh; overflow-y: auto;
+            max-width: 96vw; max-height: 90vh; overflow: auto;
+            min-width: 260px; min-height: 200px;
+            width: 420px;
+            resize: both;
+        }
+        #animIndiModal .modal-title {
+            cursor: move; user-select: none; -webkit-user-select: none;
         }
         #animModal textarea {
             width: 100%; box-sizing: border-box; min-height: 90px;
@@ -3970,13 +3976,14 @@ function animReset() {
         : 'Animation réinitialisée : faites de nouveaux choix.');
 }
 
-// ── Déplacement de la modale Animation (glisser depuis le titre) ─────────
+// ── Déplacement des modales redimensionnables (glisser depuis le titre) ──
 // Le redimensionnement est déjà permis par CSS (resize: both). On ajoute ici la
 // possibilité de déplacer la fenêtre en la faisant glisser par sa barre de titre,
-// à la souris comme au doigt (tactile).
-(function initAnimModalDrag() {
-    const box = document.querySelector('#animModal .modal-box');
-    const handle = document.querySelector('#animModal .modal-title');
+// à la souris comme au doigt (tactile). Fonction générique réutilisée pour
+// #animModal (Animation — Population) et #animIndiModal (Fiche de l'individu).
+function initModalDrag(modalSelector) {
+    const box = document.querySelector(`${modalSelector} .modal-box`);
+    const handle = document.querySelector(`${modalSelector} .modal-title`);
     if (!box || !handle) return;
 
     let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
@@ -4018,7 +4025,9 @@ function animReset() {
     }
     handle.addEventListener('mousedown', onDown);
     handle.addEventListener('touchstart', onDown, { passive: true });
-})();
+}
+initModalDrag('#animModal');
+initModalDrag('#animIndiModal');
 
 // Remplit les suggestions IdProprio (tous) et IdLot (filtrés par le propriétaire choisi)
 function animMapPopulateDatalists() {
