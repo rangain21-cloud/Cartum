@@ -1696,6 +1696,16 @@ function applyXform() {
 const localImgCache = {};  // { "images/Prop1809_07.jpg": "blob:..." }  → images déjà téléchargées (local OU Drive)
 const driveImgIndex = {};  // { "images/prop1809_07.jpg": {id, mimeType} } → catalogue Drive, pas encore téléchargées
 
+// Extrait une année plausible (4 chiffres, "SSAA") d'un nom de fichier
+// (ex : "Commune_1809.svg" → "1809", "1809_Prop_07.jpg" → "1809"). Utilisée à
+// la fois pour la date de coupure par défaut de l'animation (voir plus bas) et
+// pour cibler le préchargement des images sur l'année de la carte affichée.
+function extractYearFromFileName(name) {
+    if (!name) return null;
+    const m = name.match(/(1[5-9]\d{2}|20\d{2})/);
+    return m ? m[1] : null;
+}
+
 // Limite le nombre d'images Drive conservées en mémoire (blob URL) en même
 // temps. Sans cela, précharger tout un dossier Images (qui peut contenir des
 // centaines de photos) peut consommer plusieurs centaines de Mo, voire plus
@@ -1704,7 +1714,7 @@ const driveImgIndex = {};  // { "images/prop1809_07.jpg": {id, mimeType} } → c
 // moins récemment consultées sont évincées (URL blob libérée) ; ce n'est pas
 // une perte définitive : elles seront simplement re-téléchargées à la demande
 // si on les rouvre (resolveImgSrcAsync), ce qui reste rapide.
-const MAX_CACHED_DRIVE_IMAGES = 40;
+const MAX_CACHED_DRIVE_IMAGES = 70;
 const _imgMemory = new Map(); // entry.id -> { url, keys:[alias...], lastUsed }
 
 // Marque une image comme récemment utilisée : la Map JS conserve l'ordre
@@ -3104,7 +3114,9 @@ async function loadImagesFromDrive() {
         _imgMemory.clear(); // les blobs Drive référencés ci-dessus viennent d'être révoqués
 
         // Indexation seule (pas de téléchargement) : quasi instantané, même
-        // avec des centaines d'images.
+        // avec des centaines d'images. Le catalogue complet reste disponible
+        // pour un chargement à la demande (resolveImgSrcAsync) quelle que soit
+        // l'image ouverte, même hors du préchargement ciblé ci-dessous.
         files.forEach(f => {
             const name = f.name;
             const noExt = name.replace(/\.[^.]+$/, '');
@@ -3115,17 +3127,37 @@ async function loadImagesFromDrive() {
             driveImgIndex[`images/${noExt}`.toLowerCase()] = entry;
         });
 
-        const msg = `🖼 ${files.length} image(s) indexée(s) — chargement en arrière-plan…`;
-        setLocalStatus(msg, 'ok');
-        toast(msg);
-        driveLog(`  ✓ ${files.length} image(s) indexée(s), lancement du préchargement en arrière-plan…`);
+        // Préchargement en arrière-plan CIBLÉ : uniquement les images dont le nom
+        // contient la même année (SSAA) que celle trouvée dans le nom du fichier
+        // SVG de la carte affichée, et 60 maximum. Les autres images restent
+        // indexées et accessibles à la demande (ouverture d'un commentaire),
+        // simplement pas téléchargées à l'avance. Ça évite de télécharger et
+        // garder en mémoire des centaines de photos potentiellement sans rapport
+        // avec la carte affichée.
+        const svgYear = extractYearFromFileName(originalSvgFileName);
+        const matching = svgYear ? files.filter(f => extractYearFromFileName(f.name) === svgYear) : [];
+        const toPrefetch = matching.slice(0, 60);
+
+        if (toPrefetch.length) {
+            const msg = `🖼 ${files.length} image(s) indexée(s) — préchargement de ${toPrefetch.length} image(s) "${svgYear}" en arrière-plan…`;
+            setLocalStatus(msg, 'ok');
+            toast(msg);
+            driveLog(`  ✓ ${files.length} image(s) indexée(s) ; préchargement ciblé sur l'année ${svgYear} → ${toPrefetch.length}/${matching.length} image(s) correspondante(s) (limite 60)`);
+        } else {
+            const reason = svgYear ? `aucune image ne contient "${svgYear}" dans son nom` : `aucune année trouvée dans le nom du SVG ("${originalSvgFileName || '—'}")`;
+            const msg = `🖼 ${files.length} image(s) indexée(s) — pas de préchargement (${reason}), chargement à la demande`;
+            setLocalStatus(msg, 'ok');
+            toast(msg);
+            driveLog(`  ✓ ${files.length} image(s) indexée(s), pas de préchargement automatique : ${reason}`);
+        }
 
         // Ne pas attendre : l'app reste utilisable pendant le téléchargement.
-        // Toute image ouverte avant son tour est de toute façon téléchargée
-        // immédiatement par resolveImgSrcAsync (voir openImgModal).
-        backgroundPrefetchDriveImages(Object.values(driveImgIndex).filter(
-            (e, i, arr) => arr.findIndex(x => x.id === e.id) === i // dédoublonner (4 clés → même entrée)
-        ));
+        // Toute image ouverte avant son tour (ou hors de la sélection ciblée)
+        // est de toute façon téléchargée immédiatement par resolveImgSrcAsync
+        // (voir openImgModal).
+        if (toPrefetch.length) {
+            backgroundPrefetchDriveImages(toPrefetch.map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType })));
+        }
 
     } catch (e) {
         console.error('loadImagesFromDrive error:', e);
@@ -3783,9 +3815,7 @@ const ANIM_DEATH_CUTOFF_DEFAULT_ISO = '1809-12-31'; // valeur de repli si aucune
 // carte chargée (ex : "Commune_1809.svg" → "1809"), pour proposer une date de
 // coupure par défaut cohérente avec la carte affichée.
 function animExtractYearFromSvgFileName() {
-    if (!originalSvgFileName) return null;
-    const m = originalSvgFileName.match(/(1[5-9]\d{2}|20\d{2})/);
-    return m ? m[1] : null;
+    return extractYearFromFileName(originalSvgFileName);
 }
 
 // Date de coupure par défaut souhaitée : 01/07 (JJ/MM) de l'année trouvée dans
