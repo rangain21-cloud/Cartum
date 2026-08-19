@@ -427,20 +427,41 @@
         #animModal .modal-box {
             max-width: 96vw; max-height: 90vh; overflow: auto;
             min-width: 280px; min-height: 220px;
-            resize: both;
+            position: relative; box-sizing: border-box;
+            resize: none; /* remplacé par une poignée maison : voir .modal-resize-handle
+                              (resize natif non pris en charge sur mobile, et peu fiable sur PC) */
         }
         #animModal .modal-title {
             cursor: move; user-select: none; -webkit-user-select: none;
+            touch-action: none; /* empêche Safari/Chrome mobile d'interpréter le glisser comme un scroll de page */
         }
         #animIndiModal .modal-box {
             max-width: 96vw; max-height: 90vh; overflow: auto;
             min-width: 260px; min-height: 200px;
             width: 420px;
-            resize: both;
+            position: relative; box-sizing: border-box;
+            resize: none;
         }
         #animIndiModal .modal-title {
             cursor: move; user-select: none; -webkit-user-select: none;
+            touch-action: none;
         }
+        /* Poignée de redimensionnement maison (souris + tactile), commune aux deux
+           modales : le resize CSS natif n'est pas supporté sur mobile (Safari/Chrome
+           Android) et se montrait aussi peu fiable sur PC. */
+        .modal-resize-handle {
+            position: absolute; right: 3px; bottom: 3px;
+            width: 26px; height: 26px;
+            display: flex; align-items: flex-end; justify-content: flex-end;
+            padding: 4px;
+            cursor: nwse-resize;
+            color: var(--text-muted);
+            font-size: 15px; line-height: 1;
+            user-select: none; -webkit-user-select: none;
+            touch-action: none; /* empêche le scroll de la page pendant le geste tactile */
+            opacity: 0.6;
+        }
+        .modal-resize-handle:hover { opacity: 1; }
         #animModal textarea {
             width: 100%; box-sizing: border-box; min-height: 90px;
             background: var(--bg-dark); border: 1px solid var(--border);
@@ -965,7 +986,7 @@
         <label class="anim-field-label">1. Fichier GEDCOM (.ged) — recommandé</label>
         <label class="btn btn-primary" style="text-align:center;display:inline-block">
             📁 Charger un fichier .ged
-            <input type="file" id="animGedInput" accept=".ged,.gedcom,text/plain" style="display:none" onchange="animLoadGedFile(this)">
+            <input type="file" id="animGedInput" accept=".ged,.gedcom,.txt,text/plain,text/*,application/octet-stream,*/*" style="display:none" onchange="animLoadGedFile(this)">
         </label>
         <p class="anim-hint" id="animGedStatus" style="margin-top:4px"></p>
 
@@ -1428,7 +1449,7 @@ let sessionVisitCount = 0;
 
 // ── GOOGLE DRIVE – GIS TokenClient (popup sans redirect) ───────────
 let driveToken   = null;      // access_token actif
-let driveUserInfo = null;     // { emailAddress, displayName } du compte Google connecté (rempli par driveFetchUserInfo())
+let driveUserEmail = null;    // email du compte Google connecté (scope "email"), utilisé pour l'Historique
 let driveFileIds = { svg: null, csv: null, visites: null };
 const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.googleusercontent.com';   // ← votre Client ID OAuth2 ici
 // setAppId() est indispensable pour que l'accès drive.file soit réellement accordé
@@ -1436,7 +1457,7 @@ const DRIVE_CLIENT_ID = '270579218887-5jp1phjocqcik0pgbjtlit3n20on0de6.apps.goog
 // mais l'autorisation sur le fichier n'est jamais enregistrée → 404 au téléchargement).
 const DRIVE_APP_ID = DRIVE_CLIENT_ID.split('-')[0];
 const DRIVE_API_KEY   = 'AIzaSyB5yMNGMQwig5h8FFKSeeDQ-rqJuhp7D98';   // ← clé API Google Cloud (requise par le sélecteur Picker) — voir instructions
-const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive';   // lecture ET écriture sur les fichiers .svg/.csv choisis via la modale interne (drive.file seul ne suffit pas ici, cf. Aide.html § Confidentialité)
+const DRIVE_SCOPE     = 'https://www.googleapis.com/auth/drive email';   // Drive : lecture ET écriture sur les fichiers .svg/.csv choisis via la modale interne (drive.file seul ne suffit pas ici, cf. Aide.html § Confidentialité). "email" : identifie le compte connecté dans l'historique des visites (pavé "Historique")
 const DRIVE_FOLDER    = 'Cartum';
 const DRIVE_FOLDER_ID_KEY = 'cartum_drive_folder_id';   // mémorise le dossier choisi une fois via le Picker
 const DRIVE_IMAGES_FOLDER_ID_KEY = 'cartum_drive_images_folder_id';   // mémorise le sous-dossier Images une fois résolu
@@ -2626,26 +2647,27 @@ function _driveConnected() {
     document.getElementById('btnDriveChangeFolder').disabled = false;
     toast('Google Drive connecté ✓');
     prefetchDriveFileList();
-    driveFetchUserInfo();   // récupère (une fois) l'identité du compte Google connecté, pour l'historique Geneanet
+    fetchDriveUserInfo();
 }
 
-// Récupère et met en cache l'identité (email + nom) du compte Google actuellement
-// connecté via Drive. Utilisé pour savoir QUI (quel utilisateur de l'appli) a
-// déclenché une visite Geneanet, en plus du user Geneanet recherché.
-async function driveFetchUserInfo() {
-    if (!driveToken) { driveUserInfo = null; return null; }
+// Récupère l'email du compte Google connecté (scope "email"), pour l'associer
+// à chaque visite enregistrée dans l'Historique (pavé "Historique"). Best-effort :
+// une erreur ici ne bloque rien d'autre, l'email reste simplement absent des
+// prochaines visites (comme avant cette fonctionnalité).
+async function fetchDriveUserInfo() {
+    if (!driveToken) return;
     try {
-        const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+        const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: 'Bearer ' + driveToken }
         });
+        if (!r.ok) throw new Error('userinfo ' + r.status);
         const d = await r.json();
-        if (r.ok && d.user) {
-            driveUserInfo = { emailAddress: d.user.emailAddress || '', displayName: d.user.displayName || '' };
-        }
+        driveUserEmail = d.email || null;
+        driveLog(`  ✓ Compte Google connecté : ${driveUserEmail || '(email indisponible)'}`);
     } catch (e) {
-        driveLog('driveFetchUserInfo : ' + e.message);
+        driveUserEmail = null;
+        driveLog('  ✗ Impossible de récupérer l\'email du compte connecté : ' + e.message);
     }
-    return driveUserInfo;
 }
 
 // Anticipe, dès la connexion, la résolution du dossier "Cartum" et la liste de
@@ -3753,13 +3775,8 @@ function isoWeekKey(date) {
 
 async function popRecordVisit(user) {
     if (!user || POP_EXCLUDED.includes(user.toLowerCase())) return;
-    // S'assure d'avoir l'identité du compte Google connecté avant d'enregistrer
-    // (utile si la connexion Drive vient d'avoir lieu et que driveUserInfo n'a
-    // pas encore été rempli par _driveConnected()).
-    if (driveToken && !driveUserInfo) await driveFetchUserInfo();
-    const loginUser = driveUserInfo?.emailAddress || driveUserInfo?.displayName || 'Non connecté (local)';
     const visits = await popVisitsLoad();   // dernière version connue (Drive si possible)
-    visits.push({ user, date: new Date().toISOString(), loginUser });
+    visits.push({ user, date: new Date().toISOString(), email: driveUserEmail || null });
     await popVisitsSave(visits);
     await popStatsRefresh();
 }
@@ -3775,20 +3792,26 @@ async function popStatsToggle() {
     }
 }
 
+// Liste "à la française" : "A", "A et B", "A, B et C"…
+function joinFr(items) {
+    if (items.length === 0) return '';
+    if (items.length === 1) return items[0];
+    return items.slice(0, -1).join(', ') + ' et ' + items[items.length - 1];
+}
+
 async function popStatsRender() {
     const visits = await popVisitsLoad();
-    // Regroupe par semaine, puis par utilisateur Geneanet -> nombre de visites
-    // (PC + Android confondus), et mémorise pour chaque (semaine, user Geneanet)
-    // le détail des visites individuelles (date + compte Google connecté) pour
-    // pouvoir afficher "qui a fait la recherche" dans l'historique.
+    // Regroupe par semaine, puis par utilisateur -> { compte de visites, emails Google
+    // (compte connecté) distincts ayant contribué } — PC + Android confondus.
     const byWeek = {};
     visits.forEach(v => {
         if (!v.user || !v.user.trim()) return;
         const wk   = isoWeekKey(new Date(v.date));
         const user = v.user.toLowerCase().trim();
         if (!byWeek[wk]) byWeek[wk] = {};
-        if (!byWeek[wk][user]) byWeek[wk][user] = [];
-        byWeek[wk][user].push(v);
+        if (!byWeek[wk][user]) byWeek[wk][user] = { count: 0, emails: [] };
+        byWeek[wk][user].count++;
+        if (v.email && !byWeek[wk][user].emails.includes(v.email)) byWeek[wk][user].emails.push(v.email);
     });
     const weeks = Object.keys(byWeek).sort().reverse();   // semaine décroissante
     const content = document.getElementById('popStatsContent');
@@ -3796,20 +3819,19 @@ async function popStatsRender() {
     content.innerHTML = weeks.map(wk => {
         const counts = byWeek[wk];
         const users  = Object.keys(counts).sort();
-        const detail = users.map(u => {
-            const entries = counts[u];
-            // Détail par entrée : utilisateur Geneanet recherché + compte Google
-            // connecté ayant déclenché la recherche + heure de la visite.
-            const lines = entries.map(e => {
-                const login = e.loginUser || 'Non connecté (local)';
-                const time  = new Date(e.date).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-                return `<div style="padding-left:12px;color:var(--text-muted);font-size:0.74rem">↳ ${time} — connecté : <span style="color:#ddd">${login}</span></div>`;
-            }).join('');
-            return `<div style="margin-bottom:2px"><span style="color:#ddd">${u} (${entries.length})</span></div>${lines}`;
-        }).join('');
-        return `<div style="margin-bottom:10px">
+        // "pract(2) par a@x.com, b@x.com" — si aucun email n'est connu pour cette
+        // entrée (visite antérieure à cette fonctionnalité, ou faite hors connexion
+        // Drive), on retombe sur l'ancien affichage "user(count)" sans détail.
+        const detail = joinFr(users.map(u => {
+            const { count, emails } = counts[u];
+            let label = `${escHtml(u)}(${count})`;
+            if (emails.length) label += ' par ' + emails.map(escHtml).join(', ');
+            return label;
+        }));
+        return `<div style="margin-bottom:6px">
             <span style="color:var(--accent3);font-weight:600">${wk}</span>
-            ${detail}
+            <span style="color:var(--text-muted)"> : </span>
+            <span style="color:#ddd">${detail}</span>
         </div>`;
     }).join('');
 }
@@ -4016,10 +4038,10 @@ function animReset() {
 }
 
 // ── Déplacement des modales redimensionnables (glisser depuis le titre) ──
-// Le redimensionnement est déjà permis par CSS (resize: both). On ajoute ici la
-// possibilité de déplacer la fenêtre en la faisant glisser par sa barre de titre,
-// à la souris comme au doigt (tactile). Fonction générique réutilisée pour
-// #animModal (Animation — Population) et #animIndiModal (Fiche de l'individu).
+// On ajoute ici la possibilité de déplacer la fenêtre en la faisant glisser
+// par sa barre de titre, à la souris comme au doigt (tactile). Fonction
+// générique réutilisée pour #animModal (Animation — Population) et
+// #animIndiModal (Fiche de l'individu).
 function initModalDrag(modalSelector) {
     const box = document.querySelector(`${modalSelector} .modal-box`);
     const handle = document.querySelector(`${modalSelector} .modal-title`);
@@ -4028,6 +4050,13 @@ function initModalDrag(modalSelector) {
     let dragging = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
 
     function onDown(e) {
+        // Sans ce preventDefault, le navigateur peut interpréter l'appui sur le
+        // texte du titre comme le début d'un glisser-déposer NATIF de texte (même
+        // avec user-select:none, certains navigateurs desktop l'engagent quand
+        // même), ce qui "vole" la souris avant que notre propre logique de
+        // glissement ne prenne la main — c'est ce qui empêchait le déplacement
+        // à la souris sur PC. Non applicable/needed en tactile (listener passif).
+        if (!e.touches) e.preventDefault();
         dragging = true;
         const p = e.touches ? e.touches[0] : e;
         const rect = box.getBoundingClientRect();
@@ -4067,6 +4096,65 @@ function initModalDrag(modalSelector) {
 }
 initModalDrag('#animModal');
 initModalDrag('#animIndiModal');
+
+// ── Redimensionnement des modales (poignée maison, souris + tactile) ─────
+// Le CSS "resize: both" natif n'est pas pris en charge par les navigateurs
+// mobiles (aucune poignée tactile n'existe nativement sur Safari/Chrome
+// Android) et se montrait par ailleurs peu fiable sur PC. On implémente donc
+// une poignée dessinée à la main, avec une logique de redimensionnement en JS
+// identique quel que soit l'appareil. Fonction générique réutilisée pour
+// #animModal et #animIndiModal.
+function initModalResize(modalSelector, minWidth, minHeight) {
+    const box = document.querySelector(`${modalSelector} .modal-box`);
+    if (!box) return;
+
+    const handleEl = document.createElement('div');
+    handleEl.className = 'modal-resize-handle';
+    handleEl.textContent = '◢';
+    handleEl.title = 'Glisser pour redimensionner';
+    box.appendChild(handleEl);
+
+    let resizing = false, startX = 0, startY = 0, startW = 0, startH = 0;
+
+    function onDown(e) {
+        if (!e.touches) e.preventDefault(); // voir remarque équivalente dans initModalDrag
+        resizing = true;
+        const p = e.touches ? e.touches[0] : e;
+        const rect = box.getBoundingClientRect();
+        startX = p.clientX; startY = p.clientY;
+        startW = rect.width; startH = rect.height;
+        // Fige explicitement la taille actuelle avant de la faire varier
+        box.style.width  = startW + 'px';
+        box.style.height = startH + 'px';
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchend', onUp);
+    }
+    function onMove(e) {
+        if (!resizing) return;
+        if (e.cancelable) e.preventDefault();
+        const p = e.touches ? e.touches[0] : e;
+        const margin = 16;
+        let newW = startW + (p.clientX - startX);
+        let newH = startH + (p.clientY - startY);
+        newW = Math.min(Math.max(newW, minWidth),  window.innerWidth  - margin);
+        newH = Math.min(Math.max(newH, minHeight), window.innerHeight - margin);
+        box.style.width  = newW + 'px';
+        box.style.height = newH + 'px';
+    }
+    function onUp() {
+        resizing = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.removeEventListener('touchend', onUp);
+    }
+    handleEl.addEventListener('mousedown', onDown);
+    handleEl.addEventListener('touchstart', onDown, { passive: true });
+}
+initModalResize('#animModal', 280, 220);
+initModalResize('#animIndiModal', 260, 200);
 
 // Remplit les suggestions IdProprio (tous) et IdLot (filtrés par le propriétaire choisi)
 function animMapPopulateDatalists() {
