@@ -984,11 +984,15 @@
         </div>
 
         <label class="anim-field-label">1. Fichier GEDCOM (.ged) — recommandé</label>
-        <label class="btn btn-primary" style="text-align:center;display:inline-block">
-            📁 Charger un fichier .ged
-            <input type="file" id="animGedInput" accept=".ged,.gedcom,.txt,text/plain,text/*,application/octet-stream,*/*" style="display:none" onchange="animLoadGedFile(this)">
-        </label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <label class="btn btn-primary" style="text-align:center;display:inline-block">
+                📁 Depuis l'appareil
+                <input type="file" id="animGedInput" accept=".ged,.gedcom,.txt,text/plain,text/*,application/octet-stream,*/*" style="display:none" onchange="animLoadGedFile(this)">
+            </label>
+            <button class="btn btn-muted" id="animGedDriveBtn" onclick="animLoadGedFromDrive()">☁️ Depuis Drive (dossier Cartum)</button>
+        </div>
         <p class="anim-hint" id="animGedStatus" style="margin-top:4px"></p>
+        <div id="animGedDriveChoices" style="margin-top:4px"></div>
 
         <div id="animGedSearchBlock" style="display:none;margin-top:8px">
             <label class="anim-field-label">Rechercher l'individu (prénom, nom, année...)</label>
@@ -4424,19 +4428,85 @@ function animLoadGedFile(input) {
     const file = input.files[0]; if (!file) return;
     document.getElementById('animGedStatus').textContent = 'Lecture du fichier…';
     const reader = new FileReader();
-    reader.onload = e => {
-        try {
-            animGed = animParseGedcom(e.target.result);
-            document.getElementById('animGedStatus').textContent =
-                `✅ ${animGed.individuals.size} individus chargés depuis « ${file.name} » (traitement 100% local, rien n'est envoyé).`;
-            document.getElementById('animGedSearchBlock').style.display = 'block';
-            document.getElementById('animGedSearch').focus();
-        } catch (err) {
-            document.getElementById('animGedStatus').textContent = '❌ Fichier illisible : ' + err.message;
-        }
-    };
+    reader.onload = e => animProcessGedText(e.target.result, file.name);
     reader.onerror = () => { document.getElementById('animGedStatus').textContent = '❌ Impossible de lire ce fichier.'; };
     reader.readAsText(file, 'UTF-8');
+}
+
+// Traitement commun du contenu GEDCOM, qu'il vienne d'un fichier local
+// (FileReader) ou d'un téléchargement Drive (voir animLoadGedFromDrive).
+function animProcessGedText(text, sourceName) {
+    try {
+        animGed = animParseGedcom(text);
+        document.getElementById('animGedStatus').textContent =
+            `✅ ${animGed.individuals.size} individus chargés depuis « ${sourceName} » (traitement 100% local, rien n'est envoyé).`;
+        document.getElementById('animGedSearchBlock').style.display = 'block';
+        document.getElementById('animGedSearch').focus();
+    } catch (err) {
+        document.getElementById('animGedStatus').textContent = '❌ Fichier illisible : ' + err.message;
+    }
+}
+
+// Charge le .ged directement depuis le dossier Drive "Cartum", via le même
+// accès API Google Drive déjà utilisé pour le SVG/CSV — sans passer par le
+// sélecteur de fichiers natif iOS (app Fichiers), qui peut ne pas afficher le
+// dossier "Cartum" partagé selon la config Google Drive de l'appareil.
+async function animLoadGedFromDrive() {
+    const statusEl = document.getElementById('animGedStatus');
+    const choicesEl = document.getElementById('animGedDriveChoices');
+    choicesEl.innerHTML = '';
+
+    if (!driveToken) {
+        statusEl.textContent = '⚠️ Connectez-vous d\'abord à Google Drive (pavé "Charger depuis Drive"), puis réessayez.';
+        return;
+    }
+
+    statusEl.textContent = 'Recherche du fichier .ged dans le dossier Cartum…';
+    try {
+        let folderId, files;
+        if (_driveListPrefetch) {
+            const pre = await _driveListPrefetch;
+            if (pre) ({ folderId, files } = pre);
+        }
+        if (!folderId) {
+            folderId = await getOrCreateFolder(DRIVE_FOLDER, false).catch(() => null);
+            if (!folderId) {
+                statusEl.textContent = `⚠️ Dossier "${DRIVE_FOLDER}" non résolu — utilisez d'abord "Charger depuis Drive" pour le sélectionner, puis réessayez.`;
+                return;
+            }
+            files = await listDriveFiles(folderId);
+        }
+
+        const gedFiles = files.filter(f => /\.(ged|gedcom)$/i.test(f.name));
+        if (gedFiles.length === 0) {
+            statusEl.textContent = `❌ Aucun fichier .ged trouvé dans le dossier "${DRIVE_FOLDER}" sur Drive.`;
+            return;
+        }
+        if (gedFiles.length === 1) {
+            await animDownloadAndProcessGed(gedFiles[0]);
+            return;
+        }
+        // Plusieurs fichiers .ged : on laisse choisir (rare, mais possible)
+        statusEl.textContent = `${gedFiles.length} fichiers .ged trouvés — choisissez-en un :`;
+        choicesEl.innerHTML = gedFiles.map((f, i) =>
+            `<button class="btn btn-muted btn-sm" style="margin:2px" onclick="animDownloadAndProcessGed(animGedDriveCandidates[${i}])">📜 ${escHtml(f.name)}</button>`
+        ).join('');
+        window.animGedDriveCandidates = gedFiles;
+    } catch (e) {
+        statusEl.textContent = '❌ Erreur Drive : ' + e.message;
+    }
+}
+
+async function animDownloadAndProcessGed(fileEntry) {
+    const statusEl = document.getElementById('animGedStatus');
+    document.getElementById('animGedDriveChoices').innerHTML = '';
+    statusEl.textContent = `Téléchargement de « ${fileEntry.name} »…`;
+    try {
+        const text = await downloadDriveFile(fileEntry.id);
+        animProcessGedText(text, fileEntry.name);
+    } catch (e) {
+        statusEl.textContent = '❌ Échec du téléchargement : ' + e.message;
+    }
 }
 
 function animGedDoSearch() {
