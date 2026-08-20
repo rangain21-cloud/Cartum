@@ -3228,6 +3228,8 @@ function driveImgPickGoToCrumb(i) {
 
 // Recalcule le tri + le filtre texte et réaffiche (appelé au changement de
 // dossier, de tri, ou de texte filtré — jamais besoin de retélécharger la liste).
+let _driveImgPickVisibleFolders = []; // sous-dossiers triés actuellement affichés (référencés par index dans les boutons, cf. remarque ci-dessous)
+
 function driveImgPickRefresh() {
     const sort = document.getElementById('driveImgPickSort').value;
     let images = _driveImgPickImages.slice();
@@ -3237,6 +3239,10 @@ function driveImgPickRefresh() {
     const q = document.getElementById('driveImgPickFilter').value.trim().toLowerCase();
     _driveImgPickVisible = q ? images.filter(e => e.name.toLowerCase().includes(q)) : images;
 
+    _driveImgPickVisibleFolders = _driveImgPickFolders
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' }));
+
     // Fil d'Ariane
     document.getElementById('driveImgPickBreadcrumb').innerHTML = _driveImgPickPath.map((p, i) => {
         const isLast = i === _driveImgPickPath.length - 1;
@@ -3245,24 +3251,30 @@ function driveImgPickRefresh() {
             : `<span class="drive-crumb" onclick="driveImgPickGoToCrumb(${i})">${escHtml(p.name)}</span>`;
     }).join(' <span style="opacity:.5">/</span> ');
 
-    // Liste : dossier parent (si on n'est pas à la racine), puis sous-dossiers, puis images
+    // Liste : dossier parent (si on n'est pas à la racine), puis sous-dossiers, puis images.
+    // Les dossiers/images sont référencés par INDEX dans le onclick (comme pour
+    // chooseDriveImg) plutôt que par leur id/nom insérés directement dans l'attribut
+    // HTML : un nom de dossier contenant un guillemet aurait cassé le onclick.
     let html = '';
     if (_driveImgPickPath.length > 1) {
         html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:6px" onclick="driveImgPickGoUp()">⬆️ Dossier parent</button>`;
     }
-    _driveImgPickFolders
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' }))
-        .forEach(f => {
-            html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px" onclick="driveImgPickOpenFolder(${JSON.stringify(f.id)}, ${JSON.stringify(f.name)})">📁 ${escHtml(f.name)}</button>`;
-        });
+    _driveImgPickVisibleFolders.forEach((f, i) => {
+        html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px" onclick="driveImgPickEnterFolder(${i})">📁 ${escHtml(f.name)}</button>`;
+    });
     _driveImgPickVisible.forEach((e, i) => {
         html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">🖼 ${escHtml(e.name)}</button>`;
     });
-    if (!_driveImgPickFolders.length && !_driveImgPickVisible.length) {
+    if (!_driveImgPickVisibleFolders.length && !_driveImgPickVisible.length) {
         html += '<p class="anim-hint">Aucune image ni sous-dossier ici.</p>';
     }
     document.getElementById('driveImgPickList').innerHTML = html;
+}
+
+function driveImgPickEnterFolder(i) {
+    const f = _driveImgPickVisibleFolders[i];
+    if (!f) return;
+    driveImgPickOpenFolder(f.id, f.name);
 }
 
 function chooseDriveImg(i) {
