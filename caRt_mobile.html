@@ -1020,9 +1020,10 @@
         <div style="display:flex;align-items:center;gap:10px">
             <img id="animPortraitPreviewImg" class="anim-avatar" style="display:none;width:44px;height:44px">
             <label class="btn btn-muted btn-sm" style="flex:1;text-align:center;margin:0">
-                📷 Choisir une photo
+                📷 Depuis l'appareil
                 <input type="file" id="animPortraitInput" accept="image/*" style="display:none" onchange="animPreviewPortrait(this)">
             </label>
+            <button class="btn btn-muted btn-sm" style="margin:0" onclick="animPreviewPortraitFromDrive()">☁️ Drive</button>
             <button class="btn btn-muted btn-sm" id="animPortraitClearBtn" style="display:none" onclick="animClearPortrait()">✕</button>
         </div>
         <p class="anim-hint" style="margin-top:4px">
@@ -1051,9 +1052,10 @@
         <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
             <img id="animBgImgPreview" style="display:none;width:40px;height:40px;border-radius:6px;object-fit:cover;border:2px solid var(--accent)">
             <label class="btn btn-muted btn-sm" style="flex:1;text-align:center;margin:0">
-                🖼 Choisir une image (à la place de la carte)
+                🖼 Depuis l'appareil
                 <input type="file" id="animBgImgInput" accept="image/*" style="display:none" onchange="animSetBgImage(this)">
             </label>
+            <button class="btn btn-muted btn-sm" style="margin:0" onclick="animSetBgImageFromDrive()">☁️ Drive</button>
             <button class="btn btn-muted btn-sm" id="animBgImgClearBtn" style="display:none" onclick="animClearBgImage()">✕</button>
         </div>
         <p class="anim-hint" style="margin-top:4px">Une image choisie ici remplace la carte comme fond de la scène.</p>
@@ -1135,6 +1137,22 @@
         </div>
         <div class="modal-btns">
             <button class="btn btn-muted" onclick="closeImgSourceModal()">Annuler</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODALE GÉNÉRIQUE : choisir UNE image depuis le dossier Images de Drive ══
+     Réutilisée pour l'image de fond, le portrait principal et les photos des
+     proches — évite de passer par le sélecteur de fichiers natif iOS, qui peut
+     ne pas afficher un dossier Google Drive partagé (cf. GEDCOM, même souci). -->
+<div class="modal" id="driveImgPickModal">
+    <div class="modal-box" style="max-width:440px">
+        <div class="modal-title">☁️ Choisir une image depuis Drive</div>
+        <input type="text" id="driveImgPickFilter" placeholder="Filtrer par nom…" oninput="driveImgPickFilterChanged()"
+               style="width:100%;margin:8px 0 10px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2,#1c2530);color:var(--text,#eee);box-sizing:border-box">
+        <div id="driveImgPickList" style="max-height:50vh;overflow:auto"></div>
+        <div class="modal-btns" style="margin-top:14px">
+            <button class="btn btn-muted" onclick="closeDriveImgPickModal()">Annuler</button>
         </div>
     </div>
 </div>
@@ -3110,6 +3128,82 @@ async function downloadDriveFileBlob(fileId, resourceKey) {
 // mémoriser l'id Drive de chaque fichier ; le téléchargement réel n'a lieu
 // qu'à l'ouverture de l'image concernée (voir resolveImgSrcAsync), et le
 // résultat est mis en cache pour les consultations suivantes.
+// ── Sélecteur générique d'UNE image Drive (fond de carte, portrait, photo d'un
+// proche…) : réutilise le catalogue déjà indexé si disponible (après un
+// "Charger images depuis Drive"), sinon résout le dossier Images à la volée.
+// Contourne le sélecteur de fichiers natif iOS, qui peut ne pas afficher un
+// dossier Google Drive partagé (même limitation que pour le GEDCOM).
+let _driveImgPickCallback = null;
+let _driveImgPickEntries  = [];
+let _driveImgPickVisible  = [];
+
+async function animPickImageFromDrive(onBlobChosen) {
+    if (!driveToken) { toast('Connectez-vous d\'abord à Google Drive.'); return; }
+    _driveImgPickCallback = onBlobChosen;
+    const modal   = document.getElementById('driveImgPickModal');
+    const listEl  = document.getElementById('driveImgPickList');
+    document.getElementById('driveImgPickFilter').value = '';
+    listEl.innerHTML = '<p class="anim-hint">Chargement…</p>';
+    modal.classList.add('open');
+
+    try {
+        // Catalogue déjà indexé (ex : après "Charger images depuis Drive") → réutilisé tel quel.
+        let entries = Object.values(driveImgIndex).filter((e, i, a) => a.findIndex(x => x.id === e.id) === i);
+        if (!entries.length) {
+            let folderId;
+            if (_driveListPrefetch) {
+                const pre = await _driveListPrefetch;
+                if (pre) folderId = pre.folderId;
+            }
+            if (!folderId) folderId = await getOrCreateFolder(DRIVE_FOLDER, false);
+            const imagesFolderId = await resolveImagesFolderId(folderId);
+            const files = await listDriveFiles(imagesFolderId);
+            entries = files.map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType }));
+            // Indexe au passage, pour accélérer un prochain besoin (aperçus, etc.)
+            entries.forEach(entry => {
+                const noExt = entry.name.replace(/\.[^.]+$/, '');
+                driveImgIndex[entry.name.toLowerCase()]              = entry;
+                driveImgIndex[noExt.toLowerCase()]                   = entry;
+                driveImgIndex[`images/${entry.name}`.toLowerCase()]  = entry;
+                driveImgIndex[`images/${noExt}`.toLowerCase()]       = entry;
+            });
+        }
+        _driveImgPickEntries = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
+        renderDriveImgPickList(_driveImgPickEntries);
+    } catch (e) {
+        listEl.innerHTML = `<p class="anim-hint">❌ ${escHtml(e.message)}</p>`;
+    }
+}
+
+function renderDriveImgPickList(entries) {
+    _driveImgPickVisible = entries;
+    const listEl = document.getElementById('driveImgPickList');
+    if (!entries.length) { listEl.innerHTML = '<p class="anim-hint">Aucune image trouvée.</p>'; return; }
+    listEl.innerHTML = entries.map((e, i) =>
+        `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">🖼 ${escHtml(e.name)}</button>`
+    ).join('');
+}
+
+function driveImgPickFilterChanged() {
+    const q = document.getElementById('driveImgPickFilter').value.trim().toLowerCase();
+    renderDriveImgPickList(q ? _driveImgPickEntries.filter(e => e.name.toLowerCase().includes(q)) : _driveImgPickEntries);
+}
+
+function chooseDriveImg(i) {
+    const entry = _driveImgPickVisible[i];
+    if (!entry) return;
+    const cb = _driveImgPickCallback;
+    closeDriveImgPickModal();
+    downloadDriveFileBlob(entry.id)
+        .then(blob => { if (cb) cb(blob, entry.name); })
+        .catch(e => toast('Erreur téléchargement : ' + e.message));
+}
+
+function closeDriveImgPickModal() {
+    document.getElementById('driveImgPickModal').classList.remove('open');
+    _driveImgPickCallback = null;
+}
+
 async function loadImagesFromDrive() {
     if (!driveToken) {
         document.getElementById('localImgFolderInput').click();
@@ -4180,18 +4274,30 @@ function animMapProprioChanged() {
 
 // Image personnelle choisie comme fond de scène, à la place de la carte
 let animBgImage = null;
+// Lit un Blob (fichier local OU image téléchargée depuis Drive) et le convertit
+// en data URL, avant d'appeler onLoaded(dataUrl). Factorise le chemin commun
+// entre "fichier local" (FileReader sur File) et "image choisie sur Drive"
+// (FileReader sur Blob, File héritant de Blob donc la même API fonctionne).
+function _readBlobAsDataURL(blob, onLoaded, onError) {
+    const reader = new FileReader();
+    reader.onload = e => onLoaded(e.target.result);
+    reader.onerror = () => (onError || (() => toast('Impossible de lire cette image.')))();
+    reader.readAsDataURL(blob);
+}
+
+function _applyBgImageDataUrl(dataUrl) {
+    animBgImage = dataUrl;
+    const img = document.getElementById('animBgImgPreview');
+    img.src = animBgImage;
+    img.style.display = 'block';
+    document.getElementById('animBgImgClearBtn').style.display = 'inline-block';
+}
 function animSetBgImage(input) {
     const file = input.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-        animBgImage = e.target.result; // data URL
-        const img = document.getElementById('animBgImgPreview');
-        img.src = animBgImage;
-        img.style.display = 'block';
-        document.getElementById('animBgImgClearBtn').style.display = 'inline-block';
-    };
-    reader.onerror = () => toast('Impossible de lire cette image.');
-    reader.readAsDataURL(file);
+    _readBlobAsDataURL(file, _applyBgImageDataUrl);
+}
+function animSetBgImageFromDrive() {
+    animPickImageFromDrive(blob => _readBlobAsDataURL(blob, _applyBgImageDataUrl));
 }
 function animClearBgImage() {
     animBgImage = null;
@@ -4202,19 +4308,21 @@ function animClearBgImage() {
 
 // Portrait de l'individu principal chargé via fichier (évite de coller du base64 dans le JSON)
 let animPendingPortrait = null;
+function _applyPortraitDataUrl(dataUrl) {
+    animPendingPortrait = dataUrl; // data URL complète, prête pour un <img src>
+    const img = document.getElementById('animPortraitPreviewImg');
+    img.src = animPendingPortrait;
+    img.style.display = 'block';
+    document.getElementById('animPortraitClearBtn').style.display = 'inline-block';
+    // Si des données sont déjà chargées, on met à jour l'aperçu tout de suite
+    if (animData) { animData.portrait = animPendingPortrait; animRenderPreview(); }
+}
 function animPreviewPortrait(input) {
     const file = input.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-        animPendingPortrait = e.target.result; // data URL complète, prête pour un <img src>
-        const img = document.getElementById('animPortraitPreviewImg');
-        img.src = animPendingPortrait;
-        img.style.display = 'block';
-        document.getElementById('animPortraitClearBtn').style.display = 'inline-block';
-        // Si des données sont déjà chargées, on met à jour l'aperçu tout de suite
-        if (animData) { animData.portrait = animPendingPortrait; animRenderPreview(); }
-    };
-    reader.readAsDataURL(file);
+    _readBlobAsDataURL(file, _applyPortraitDataUrl);
+}
+function animPreviewPortraitFromDrive() {
+    animPickImageFromDrive(blob => _readBlobAsDataURL(blob, _applyPortraitDataUrl));
 }
 function animClearPortrait() {
     animPendingPortrait = null;
@@ -4722,10 +4830,11 @@ function animRelRowHtml(r, idx, cssClass, tagLabel) {
             ${animEsc(fullName)}${animEsc(ageTxt)}
             <div class="anim-rel-tag">${tagLabel}</div>
         </div>
-        <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(r.prenom)}">
+        <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(r.prenom)} (appareil)">
             📷
             <input type="file" accept="image/*" style="display:none" onchange="animSetRelationPhoto(${idx}, this)">
         </label>
+        <button class="btn btn-muted anim-photo-btn" type="button" title="Choisir une photo pour ${animEsc(r.prenom)} depuis Drive" onclick="animSetRelationPhotoFromDrive(${idx})">☁️</button>
     </div>`;
 }
 
@@ -4751,10 +4860,11 @@ function animRenderPreview() {
             ${animEsc(mainDisplayName)}${animEsc(mainAgeTxt)}
             <div class="anim-rel-tag">Individu principal</div>
         </div>
-        <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(animData.prenom)}">
+        <label class="btn btn-muted anim-photo-btn" title="Choisir une photo pour ${animEsc(animData.prenom)} (appareil)">
             📷
             <input type="file" accept="image/*" style="display:none" onchange="animPreviewPortrait(this)">
         </label>
+        <button class="btn btn-muted anim-photo-btn" type="button" title="Choisir une photo depuis Drive" onclick="animPreviewPortraitFromDrive()">☁️</button>
     </div>`;
 
     if (spouses.length) {
@@ -4771,22 +4881,26 @@ function animRenderPreview() {
     document.getElementById('animPreview').innerHTML = html;
 }
 
-// Associe une photo (choisie par l'utilisateur) à un proche précis, par son index
-// dans animData.relations ; stockée directement en base64 dans les données chargées.
+// Associe une photo (choisie par l'utilisateur, ou téléchargée depuis Drive) à
+// un proche précis, par son index dans animData.relations ; stockée directement
+// en base64 dans les données chargées.
+function _applyRelationPhotoDataUrl(idx, dataUrl) {
+    if (!animData || !animData.relations[idx]) return;
+    animData.relations[idx].portrait = dataUrl; // data URL base64
+    const img = document.getElementById('animRelAvatar_' + idx);
+    if (img) { img.src = dataUrl; img.style.opacity = 1; }
+    // Si le JSON est affiché, on le garde synchronisé avec la photo ajoutée
+    const ta = document.getElementById('animJson');
+    if (ta && ta.value.trim()) ta.value = JSON.stringify(animData, null, 2);
+}
 function animSetRelationPhoto(idx, input) {
     const file = input.files[0]; if (!file) return;
     if (!animData || !animData.relations[idx]) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-        animData.relations[idx].portrait = e.target.result; // data URL base64
-        const img = document.getElementById('animRelAvatar_' + idx);
-        if (img) { img.src = e.target.result; img.style.opacity = 1; }
-        // Si le JSON est affiché, on le garde synchronisé avec la photo ajoutée
-        const ta = document.getElementById('animJson');
-        if (ta && ta.value.trim()) ta.value = JSON.stringify(animData, null, 2);
-    };
-    reader.onerror = () => toast('Impossible de lire cette image.');
-    reader.readAsDataURL(file);
+    _readBlobAsDataURL(file, dataUrl => _applyRelationPhotoDataUrl(idx, dataUrl));
+}
+function animSetRelationPhotoFromDrive(idx) {
+    if (!animData || !animData.relations[idx]) return;
+    animPickImageFromDrive(blob => _readBlobAsDataURL(blob, dataUrl => _applyRelationPhotoDataUrl(idx, dataUrl)));
 }
 
 // Ajoute une silhouette animée sur la scène ; delay/duration en secondes ;
