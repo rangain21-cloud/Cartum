@@ -462,6 +462,17 @@
             opacity: 0.6;
         }
         .modal-resize-handle:hover { opacity: 1; }
+        /* Fil d'Ariane du navigateur de dossiers Drive (choix d'image) */
+        .drive-breadcrumb {
+            font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;
+            word-break: break-word;
+        }
+        .drive-breadcrumb .drive-crumb {
+            cursor: pointer; text-decoration: underline;
+        }
+        .drive-breadcrumb .drive-crumb-current {
+            color: var(--text); text-decoration: none; cursor: default;
+        }
         #animModal textarea {
             width: 100%; box-sizing: border-box; min-height: 90px;
             background: var(--bg-dark); border: 1px solid var(--border);
@@ -1141,15 +1152,24 @@
     </div>
 </div>
 
-<!-- ══ MODALE GÉNÉRIQUE : choisir UNE image depuis le dossier Images de Drive ══
+<!-- ══ MODALE GÉNÉRIQUE : choisir UNE image dans le dossier Cartum (et ses
+     sous-dossiers) de Drive ═══════════════════════════════════════════════
      Réutilisée pour l'image de fond, le portrait principal et les photos des
      proches — évite de passer par le sélecteur de fichiers natif iOS, qui peut
      ne pas afficher un dossier Google Drive partagé (cf. GEDCOM, même souci). -->
 <div class="modal" id="driveImgPickModal">
-    <div class="modal-box" style="max-width:440px">
+    <div class="modal-box" style="max-width:460px">
         <div class="modal-title">☁️ Choisir une image depuis Drive</div>
-        <input type="text" id="driveImgPickFilter" placeholder="Filtrer par nom…" oninput="driveImgPickFilterChanged()"
-               style="width:100%;margin:8px 0 10px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2,#1c2530);color:var(--text,#eee);box-sizing:border-box">
+        <div id="driveImgPickBreadcrumb" class="drive-breadcrumb"></div>
+        <div style="display:flex;gap:8px;margin:8px 0 10px">
+            <input type="text" id="driveImgPickFilter" placeholder="Filtrer par nom…" oninput="driveImgPickRefresh()"
+                   style="flex:1;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2,#1c2530);color:var(--text,#eee);box-sizing:border-box">
+            <select id="driveImgPickSort" onchange="driveImgPickRefresh()"
+                    style="padding:8px 6px;border-radius:6px;border:1px solid var(--border);background:var(--bg2,#1c2530);color:var(--text,#eee)">
+                <option value="name">Nom (A→Z)</option>
+                <option value="date">Date (récent d'abord)</option>
+            </select>
+        </div>
         <div id="driveImgPickList" style="max-height:50vh;overflow:auto"></div>
         <div class="modal-btns" style="margin-top:14px">
             <button class="btn btn-muted" onclick="closeDriveImgPickModal()">Annuler</button>
@@ -3127,66 +3147,122 @@ async function downloadDriveFileBlob(fileId, resourceKey) {
 // contente de récupérer la liste (1 seul appel, quasi instantané) et de
 // mémoriser l'id Drive de chaque fichier ; le téléchargement réel n'a lieu
 // qu'à l'ouverture de l'image concernée (voir resolveImgSrcAsync), et le
-// résultat est mis en cache pour les consultations suivantes.
 // ── Sélecteur générique d'UNE image Drive (fond de carte, portrait, photo d'un
-// proche…) : réutilise le catalogue déjà indexé si disponible (après un
-// "Charger images depuis Drive"), sinon résout le dossier Images à la volée.
+// proche…) : navigateur de dossiers complet, démarrant sur le dossier Cartum et
+// permettant d'entrer dans ses sous-dossiers, avec tri des fichiers affichés.
 // Contourne le sélecteur de fichiers natif iOS, qui peut ne pas afficher un
 // dossier Google Drive partagé (même limitation que pour le GEDCOM).
 let _driveImgPickCallback = null;
-let _driveImgPickEntries  = [];
-let _driveImgPickVisible  = [];
+let _driveImgPickPath     = [];   // pile des dossiers ouverts : [{id,name}, …] — le premier est Cartum
+let _driveImgPickFolders  = [];   // sous-dossiers du dossier actuellement affiché
+let _driveImgPickImages   = [];   // images du dossier actuellement affiché (non triées/filtrées)
+let _driveImgPickVisible  = [];   // images réellement affichées (après tri + filtre texte)
 
 async function animPickImageFromDrive(onBlobChosen) {
     if (!driveToken) { toast('Connectez-vous d\'abord à Google Drive.'); return; }
     _driveImgPickCallback = onBlobChosen;
-    const modal   = document.getElementById('driveImgPickModal');
-    const listEl  = document.getElementById('driveImgPickList');
     document.getElementById('driveImgPickFilter').value = '';
-    listEl.innerHTML = '<p class="anim-hint">Chargement…</p>';
-    modal.classList.add('open');
+    document.getElementById('driveImgPickSort').value = 'name';
+    document.getElementById('driveImgPickModal').classList.add('open');
 
     try {
-        // Catalogue déjà indexé (ex : après "Charger images depuis Drive") → réutilisé tel quel.
-        let entries = Object.values(driveImgIndex).filter((e, i, a) => a.findIndex(x => x.id === e.id) === i);
-        if (!entries.length) {
-            let folderId;
-            if (_driveListPrefetch) {
-                const pre = await _driveListPrefetch;
-                if (pre) folderId = pre.folderId;
-            }
-            if (!folderId) folderId = await getOrCreateFolder(DRIVE_FOLDER, false);
-            const imagesFolderId = await resolveImagesFolderId(folderId);
-            const files = await listDriveFiles(imagesFolderId);
-            entries = files.map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType }));
-            // Indexe au passage, pour accélérer un prochain besoin (aperçus, etc.)
-            entries.forEach(entry => {
-                const noExt = entry.name.replace(/\.[^.]+$/, '');
-                driveImgIndex[entry.name.toLowerCase()]              = entry;
-                driveImgIndex[noExt.toLowerCase()]                   = entry;
-                driveImgIndex[`images/${entry.name}`.toLowerCase()]  = entry;
-                driveImgIndex[`images/${noExt}`.toLowerCase()]       = entry;
-            });
+        let rootId;
+        if (_driveListPrefetch) {
+            const pre = await _driveListPrefetch;
+            if (pre) rootId = pre.folderId;
         }
-        _driveImgPickEntries = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
-        renderDriveImgPickList(_driveImgPickEntries);
+        if (!rootId) rootId = await getOrCreateFolder(DRIVE_FOLDER, false);
+        _driveImgPickPath = [];
+        await driveImgPickOpenFolder(rootId, DRIVE_FOLDER);
     } catch (e) {
-        listEl.innerHTML = `<p class="anim-hint">❌ ${escHtml(e.message)}</p>`;
+        document.getElementById('driveImgPickList').innerHTML =
+            `<p class="anim-hint">❌ Dossier "${escHtml(DRIVE_FOLDER)}" non résolu — utilisez d'abord "Charger depuis Drive" pour le sélectionner, puis réessayez.</p>`;
     }
 }
 
-function renderDriveImgPickList(entries) {
-    _driveImgPickVisible = entries;
-    const listEl = document.getElementById('driveImgPickList');
-    if (!entries.length) { listEl.innerHTML = '<p class="anim-hint">Aucune image trouvée.</p>'; return; }
-    listEl.innerHTML = entries.map((e, i) =>
-        `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">🖼 ${escHtml(e.name)}</button>`
-    ).join('');
+// Liste le contenu direct d'un dossier Drive : sous-dossiers + fichiers image
+// (les autres types de fichiers, ex : .svg/.csv/.ged, ne sont pas affichés ici).
+async function listDriveImageFolderContents(folderId) {
+    const params = new URLSearchParams({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'files(id,name,mimeType,modifiedTime)', pageSize: '300'
+    });
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
+        headers: { Authorization: 'Bearer ' + driveToken }
+    });
+    if (!r.ok) throw new Error(`files.list ${r.status}`);
+    const d = await r.json();
+    const all = d.files || [];
+    return {
+        folders: all.filter(f => f.mimeType === 'application/vnd.google-apps.folder'),
+        images:  all.filter(f => f.mimeType && f.mimeType.startsWith('image/'))
+    };
 }
 
-function driveImgPickFilterChanged() {
+async function driveImgPickOpenFolder(folderId, folderName) {
+    document.getElementById('driveImgPickList').innerHTML = '<p class="anim-hint">Chargement…</p>';
+    try {
+        const { folders, images } = await listDriveImageFolderContents(folderId);
+        _driveImgPickPath.push({ id: folderId, name: folderName });
+        _driveImgPickFolders = folders;
+        _driveImgPickImages  = images;
+        driveImgPickRefresh();
+    } catch (e) {
+        document.getElementById('driveImgPickList').innerHTML = `<p class="anim-hint">❌ ${escHtml(e.message)}</p>`;
+    }
+}
+
+function driveImgPickGoUp() {
+    if (_driveImgPickPath.length <= 1) return; // déjà sur Cartum, rien au-dessus
+    _driveImgPickPath.pop();                    // retire le dossier courant
+    const parent = _driveImgPickPath.pop();      // le parent devient le nouveau courant
+    driveImgPickOpenFolder(parent.id, parent.name);
+}
+
+// Clic sur une miette du fil d'Ariane : revient directement à ce niveau-là
+function driveImgPickGoToCrumb(i) {
+    const target = _driveImgPickPath[i];
+    _driveImgPickPath = _driveImgPickPath.slice(0, i);
+    driveImgPickOpenFolder(target.id, target.name);
+}
+
+// Recalcule le tri + le filtre texte et réaffiche (appelé au changement de
+// dossier, de tri, ou de texte filtré — jamais besoin de retélécharger la liste).
+function driveImgPickRefresh() {
+    const sort = document.getElementById('driveImgPickSort').value;
+    let images = _driveImgPickImages.slice();
+    if (sort === 'date') images.sort((a, b) => (b.modifiedTime || '').localeCompare(a.modifiedTime || ''));
+    else images.sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' }));
+
     const q = document.getElementById('driveImgPickFilter').value.trim().toLowerCase();
-    renderDriveImgPickList(q ? _driveImgPickEntries.filter(e => e.name.toLowerCase().includes(q)) : _driveImgPickEntries);
+    _driveImgPickVisible = q ? images.filter(e => e.name.toLowerCase().includes(q)) : images;
+
+    // Fil d'Ariane
+    document.getElementById('driveImgPickBreadcrumb').innerHTML = _driveImgPickPath.map((p, i) => {
+        const isLast = i === _driveImgPickPath.length - 1;
+        return isLast
+            ? `<span class="drive-crumb-current">${escHtml(p.name)}</span>`
+            : `<span class="drive-crumb" onclick="driveImgPickGoToCrumb(${i})">${escHtml(p.name)}</span>`;
+    }).join(' <span style="opacity:.5">/</span> ');
+
+    // Liste : dossier parent (si on n'est pas à la racine), puis sous-dossiers, puis images
+    let html = '';
+    if (_driveImgPickPath.length > 1) {
+        html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:6px" onclick="driveImgPickGoUp()">⬆️ Dossier parent</button>`;
+    }
+    _driveImgPickFolders
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' }))
+        .forEach(f => {
+            html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px" onclick="driveImgPickOpenFolder(${JSON.stringify(f.id)}, ${JSON.stringify(f.name)})">📁 ${escHtml(f.name)}</button>`;
+        });
+    _driveImgPickVisible.forEach((e, i) => {
+        html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">🖼 ${escHtml(e.name)}</button>`;
+    });
+    if (!_driveImgPickFolders.length && !_driveImgPickVisible.length) {
+        html += '<p class="anim-hint">Aucune image ni sous-dossier ici.</p>';
+    }
+    document.getElementById('driveImgPickList').innerHTML = html;
 }
 
 function chooseDriveImg(i) {
