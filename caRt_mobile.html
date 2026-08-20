@@ -3257,13 +3257,13 @@ function driveImgPickRefresh() {
     // HTML : un nom de dossier contenant un guillemet aurait cassé le onclick.
     let html = '';
     if (_driveImgPickPath.length > 1) {
-        html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:6px" onclick="driveImgPickGoUp()">⬆️ Dossier parent</button>`;
+        html += `<button class="btn btn-muted btn-sm btn-full" style="justify-content:flex-start;text-align:left;margin-bottom:6px" onclick="driveImgPickGoUp()">⬆️ Dossier parent</button>`;
     }
     _driveImgPickVisibleFolders.forEach((f, i) => {
-        html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px" onclick="driveImgPickEnterFolder(${i})">📁 ${escHtml(f.name)}</button>`;
+        html += `<button class="btn btn-muted btn-sm btn-full" style="justify-content:flex-start;text-align:left;margin-bottom:4px" onclick="driveImgPickEnterFolder(${i})">📁 ${escHtml(f.name)}</button>`;
     });
     _driveImgPickVisible.forEach((e, i) => {
-        html += `<button class="btn btn-muted btn-sm btn-full" style="text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">🖼 ${escHtml(e.name)}</button>`;
+        html += `<button class="btn btn-muted btn-sm btn-full" style="justify-content:flex-start;text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">🖼 ${escHtml(e.name)}</button>`;
     });
     if (!_driveImgPickVisibleFolders.length && !_driveImgPickVisible.length) {
         html += '<p class="anim-hint">Aucune image ni sous-dossier ici.</p>';
