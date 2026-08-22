@@ -435,20 +435,6 @@
             cursor: move; user-select: none; -webkit-user-select: none;
             touch-action: none; /* empêche Safari/Chrome mobile d'interpréter le glisser comme un scroll de page */
         }
-        /* État "agrandi" appliqué UNIQUEMENT à la scène de marche (#animStage), pas
-           à toute la fenêtre : remplit le viewport visible, avec ou sans plein
-           écran natif du navigateur (voir animToggleStageFullscreen — iPhone/Safari
-           ne prend pas en charge le plein écran natif hors <video>, donc cet état
-           "agrandi" en CSS pur est le seul moyen d'obtenir un équivalent là-bas). */
-        #animStage.anim-stage-maximized {
-            position: fixed !important; inset: 0 !important;
-            width: 100vw !important; height: 100dvh !important;
-            max-width: none !important; margin: 0 !important; border-radius: 0 !important;
-            z-index: 700; /* au-dessus des modales (600) */
-        }
-        #animStage:fullscreen, #animStage:-webkit-full-screen {
-            width: 100%; height: 100%; max-width: none;
-        }
         #animIndiModal .modal-box {
             max-width: 96vw; max-height: 90vh; overflow: auto;
             min-width: 260px; min-height: 200px;
@@ -1102,9 +1088,8 @@
         <div style="text-align:center">
             <button class="btn btn-success" style="margin-top:12px" id="animLaunchBtn" disabled onclick="animLaunch()">🚶 Lancer l'animation</button>
         </div>
-        <div style="text-align:center;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <div style="text-align:center">
             <button class="btn btn-danger btn-sm" style="margin-top:8px" onclick="animReset()">🔄 Réinitialiser l'animation</button>
-            <button class="btn btn-muted btn-sm" style="margin-top:8px" id="animFullscreenBtn" onclick="animToggleStageFullscreen()" title="Agrandit uniquement la scène de marche ci-dessous">⛶ Plein écran</button>
         </div>
 
         <label class="anim-field-label" style="margin-top:10px">Taille du fond de scène (cadré à gauche)</label>
@@ -4272,13 +4257,7 @@ function openAnimModal() {
     document.getElementById('animModal').classList.add('open');
     // Repart d'une position et d'une taille par défaut (centrée) à chaque ouverture,
     // même si l'utilisateur avait déplacé/redimensionné la modale la fois précédente.
-    const box = document.querySelector('#animModal .modal-box');
-    box.removeAttribute('style');
-    // Idem pour la scène de marche, si elle avait été laissée en plein écran
-    const stage = document.getElementById('animStage');
-    stage.classList.remove('anim-stage-maximized');
-    const fsBtn = document.getElementById('animFullscreenBtn');
-    if (fsBtn) fsBtn.textContent = '⛶ Plein écran';
+    document.querySelector('#animModal .modal-box').removeAttribute('style');
     animMapPopulateDatalists();
     // Préremplit avec le lot actuellement sélectionné sur la carte, s'il y en a un
     if (currentIdLot && csvData) {
@@ -4464,63 +4443,6 @@ function initModalResize(modalSelector, minWidth, minHeight) {
 }
 initModalResize('#animModal', 280, 220);
 initModalResize('#animIndiModal', 260, 200);
-
-// ── Plein écran de la fenêtre "Animation — Population" ───────────────────
-// Deux niveaux, cumulés :
-// 1) "Agrandi" (CSS pur, fonctionne PARTOUT y compris iPhone/Safari) : la
-//    fenêtre remplit tout le viewport visible du navigateur.
-// 2) Plein écran natif du navigateur (API Fullscreen), en plus si le
-//    navigateur le permet : masque aussi la barre d'adresse/onglets.
-//    IMPORTANT : Safari sur iPhone NE PREND PAS EN CHARGE cette API pour un
-//    élément quelconque (seule une balise <video> peut l'utiliser sur iOS) —
-//    sur iPhone, seul le niveau 1 (agrandi) sera donc obtenu ; sur PC et
-//    Android, les deux se cumulent pour un vrai plein écran sans barre de navigateur.
-// ── Plein écran de la SCÈNE DE MARCHE (#animStage) uniquement ────────────
-// Contrairement à une première version, ce n'est PAS toute la fenêtre
-// "Animation — Population" qui s'agrandit (formulaire, réglages…), seulement
-// l'image/scène de marche elle-même.
-// Deux niveaux, cumulés :
-// 1) "Agrandi" (CSS pur, fonctionne PARTOUT y compris iPhone/Safari) : la
-//    scène remplit tout le viewport visible du navigateur.
-// 2) Plein écran natif du navigateur (API Fullscreen), en plus si le
-//    navigateur le permet : masque aussi la barre d'adresse/onglets.
-//    IMPORTANT : Safari sur iPhone NE PREND PAS EN CHARGE cette API pour un
-//    élément quelconque (seule une balise <video> peut l'utiliser sur iOS) —
-//    sur iPhone, seul le niveau 1 (agrandi) sera donc obtenu ; sur PC et
-//    Android, les deux se cumulent pour un vrai plein écran sans barre de navigateur.
-function animToggleStageFullscreen() {
-    const stage = document.getElementById('animStage');
-    const btn   = document.getElementById('animFullscreenBtn');
-    const isMaximized = stage.classList.contains('anim-stage-maximized');
-
-    if (!isMaximized) {
-        stage.classList.add('anim-stage-maximized');
-        if (btn) btn.textContent = '⛶ Quitter le plein écran';
-        const requestFs = stage.requestFullscreen || stage.webkitRequestFullscreen;
-        if (requestFs) requestFs.call(stage).catch(() => { /* indisponible (ex : iPhone) : on reste au niveau "agrandi" */ });
-    } else {
-        stage.classList.remove('anim-stage-maximized');
-        if (btn) btn.textContent = '⛶ Plein écran';
-        const exitFs = document.exitFullscreen || document.webkitExitFullscreen;
-        if (document.fullscreenElement || document.webkitFullscreenElement) exitFs.call(document).catch(() => {});
-    }
-    // Relance l'animation : les tailles/positions des personnages sont calculées
-    // en fonction de la taille de la scène au moment du lancement (voir animLaunch) ;
-    // sans ce relance, la mise en page resterait calée sur l'ancienne taille.
-    if (animData) animLaunch();
-}
-// Si le plein écran natif est quitté autrement (touche Échap, bouton du
-// navigateur) : on redescend proprement au niveau "agrandi" plutôt que de
-// laisser la scène dans un état incohérent (et sans bouton pour en sortir).
-document.addEventListener('fullscreenchange', () => {
-    const stage = document.getElementById('animStage');
-    if (!document.fullscreenElement && stage && stage.classList.contains('anim-stage-maximized')) {
-        stage.classList.remove('anim-stage-maximized');
-        const btn = document.getElementById('animFullscreenBtn');
-        if (btn) btn.textContent = '⛶ Plein écran';
-        if (animData) animLaunch();
-    }
-});
 
 // Remplit les suggestions IdProprio (tous) et IdLot (filtrés par le propriétaire choisi)
 function animMapPopulateDatalists() {
@@ -5345,19 +5267,6 @@ function animLaunch() {
     const stage = document.getElementById('animStage');
     stage.innerHTML = '';
     stage.classList.add('show');
-
-    // En plein écran "scène seule" : un bouton de sortie est indispensable ici, car
-    // le bouton habituel du formulaire se retrouve masqué sous la scène (position
-    // fixe, au-dessus de tout) une fois celle-ci agrandie.
-    if (stage.classList.contains('anim-stage-maximized')) {
-        const exitBtn = document.createElement('button');
-        exitBtn.className = 'btn btn-muted btn-sm';
-        exitBtn.type = 'button';
-        exitBtn.textContent = '✕ Quitter le plein écran';
-        exitBtn.style.cssText = 'position:absolute;top:10px;right:10px;z-index:10';
-        exitBtn.onclick = () => animToggleStageFullscreen();
-        stage.appendChild(exitBtn);
-    }
 
     // Fond de scène (facultatif) : ajouté en premier pour rester derrière les personnages,
     // étendu à toute la largeur et toute la hauteur de la scène de marche.
