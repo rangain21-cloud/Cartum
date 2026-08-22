@@ -473,6 +473,16 @@
         .drive-breadcrumb .drive-crumb-current {
             color: var(--text); text-decoration: none; cursor: default;
         }
+        /* Vignette d'aperçu affichée avant le nom de fichier dans le sélecteur
+           d'image Drive (taille fixe pour éviter tout décalage de mise en page,
+           que la vignette existe, soit en cours de chargement, ou tombe en erreur) */
+        .drive-img-thumb, .drive-img-thumb-fallback {
+            width: 28px; height: 28px; border-radius: 4px; flex-shrink: 0;
+            object-fit: cover; background: var(--bg-dark, #12181f);
+        }
+        .drive-img-thumb-fallback {
+            display: inline-flex; align-items: center; justify-content: center; font-size: 14px;
+        }
         #animModal textarea {
             width: 100%; box-sizing: border-box; min-height: 90px;
             background: var(--bg-dark); border: 1px solid var(--border);
@@ -3185,7 +3195,7 @@ async function animPickImageFromDrive(onBlobChosen) {
 async function listDriveImageFolderContents(folderId) {
     const params = new URLSearchParams({
         q: `'${folderId}' in parents and trashed = false`,
-        fields: 'files(id,name,mimeType,modifiedTime)', pageSize: '300'
+        fields: 'files(id,name,mimeType,modifiedTime,thumbnailLink)', pageSize: '300'
     });
     const r = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
         headers: { Authorization: 'Bearer ' + driveToken }
@@ -3263,12 +3273,85 @@ function driveImgPickRefresh() {
         html += `<button class="btn btn-muted btn-sm btn-full" style="justify-content:flex-start;text-align:left;margin-bottom:4px" onclick="driveImgPickEnterFolder(${i})">📁 ${escHtml(f.name)}</button>`;
     });
     _driveImgPickVisible.forEach((e, i) => {
-        html += `<button class="btn btn-muted btn-sm btn-full" style="justify-content:flex-start;text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">🖼 ${escHtml(e.name)}</button>`;
+        // Emplacement de la vignette : on démarre toujours sur l'icône de repli,
+        // puis on la remplace une fois la vignette réellement téléchargée (voir
+        // driveImgPickLoadVisibleThumbs) — un simple <img src="thumbnailLink">
+        // ne fonctionne pas de façon fiable (Safari notamment bloque les cookies
+        // tiers dont Drive a besoin pour servir l'image sans jeton explicite).
+        const thumb = `<span class="drive-img-thumb-fallback" data-thumb-slot="${i}">🖼</span>`;
+        html += `<button class="btn btn-muted btn-sm btn-full" style="justify-content:flex-start;text-align:left;margin-bottom:4px;white-space:normal" onclick="chooseDriveImg(${i})">${thumb} ${escHtml(e.name)}</button>`;
     });
     if (!_driveImgPickVisibleFolders.length && !_driveImgPickVisible.length) {
         html += '<p class="anim-hint">Aucune image ni sous-dossier ici.</p>';
     }
     document.getElementById('driveImgPickList').innerHTML = html;
+    driveImgPickLoadVisibleThumbs();
+}
+
+// Télécharge les vignettes des images actuellement affichées, et remplace
+// l'icône de repli par l'aperçu une fois chaque téléchargement terminé.
+// IMPORTANT : on passe par la même route déjà éprouvée pour télécharger les
+// images entières (l'API Drive elle-même, googleapis.com, authentifiée par
+// jeton Bearer) — PAS par le champ "thumbnailLink", qui pointe vers un autre
+// domaine Google non conçu pour des requêtes authentifiées cross-origin
+// depuis une appli web tierce (d'où l'échec silencieux observé). L'image
+// téléchargée est ensuite réduite côté navigateur (canvas) en une toute
+// petite vignette, pour rester légère en mémoire même avec beaucoup de photos.
+let _driveImgPickRenderGen = 0;         // jeton de génération : ignore les réponses obsolètes si on a changé de dossier/tri entre-temps
+const _driveImgThumbCache  = new Map(); // fileId -> data URL de la vignette réduite, réutilisée tant que la modale reste ouverte
+const DRIVE_THUMB_PX = 56; // taille de la vignette générée (×2 environ la taille affichée, pour rester net sur écran haute densité)
+
+// Réduit une image (Blob) en une petite vignette carrée (recadrée façon
+// "cover"), et renvoie une data URL JPEG compacte — bien plus légère à garder
+// en mémoire que le Blob original.
+function _makeThumbDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const objUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+            try {
+                const side = DRIVE_THUMB_PX;
+                const canvas = document.createElement('canvas');
+                canvas.width = side; canvas.height = side;
+                const ctx = canvas.getContext('2d');
+                // Recadrage "cover" : on prend le plus grand carré centré dans l'image source
+                const s = Math.min(img.naturalWidth, img.naturalHeight);
+                const sx = (img.naturalWidth  - s) / 2;
+                const sy = (img.naturalHeight - s) / 2;
+                ctx.drawImage(img, sx, sy, s, s, 0, 0, side, side);
+                resolve(canvas.toDataURL('image/jpeg', 0.7));
+            } catch (err) { reject(err); }
+            finally { URL.revokeObjectURL(objUrl); }
+        };
+        img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error('image illisible')); };
+        img.src = objUrl;
+    });
+}
+
+async function driveImgPickLoadVisibleThumbs() {
+    const gen = ++_driveImgPickRenderGen;
+    const entries = _driveImgPickVisible;
+    const CONCURRENCY = 3; // modéré : chaque vignette implique de télécharger l'image entière
+    let idx = 0;
+
+    async function worker() {
+        while (idx < entries.length) {
+            const i = idx++;
+            const e = entries[i];
+            try {
+                let dataUrl = _driveImgThumbCache.get(e.id);
+                if (!dataUrl) {
+                    const blob = await downloadDriveFileBlob(e.id);
+                    dataUrl = await _makeThumbDataUrl(blob);
+                    _driveImgThumbCache.set(e.id, dataUrl);
+                }
+                if (gen !== _driveImgPickRenderGen) continue; // la vue a changé pendant le téléchargement : on n'applique plus
+                const slot = document.querySelector(`[data-thumb-slot="${i}"]`);
+                if (slot) slot.outerHTML = `<img class="drive-img-thumb" src="${dataUrl}" alt="">`;
+            } catch (err) { /* silencieux : l'icône de repli 🖼 reste affichée pour ce fichier */ }
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, entries.length) }, worker));
 }
 
 function driveImgPickEnterFolder(i) {
@@ -3290,6 +3373,7 @@ function chooseDriveImg(i) {
 function closeDriveImgPickModal() {
     document.getElementById('driveImgPickModal').classList.remove('open');
     _driveImgPickCallback = null;
+    _driveImgThumbCache.clear(); // simples data URLs (pas de blob à révoquer)
 }
 
 async function loadImagesFromDrive() {
