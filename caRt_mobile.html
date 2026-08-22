@@ -482,7 +482,9 @@
         }
         .drive-img-thumb-fallback {
             display: inline-flex; align-items: center; justify-content: center; font-size: 14px;
+            animation: driveThumbPulse 1.4s ease-in-out infinite; /* signale que la vignette est en cours de chargement */
         }
+        @keyframes driveThumbPulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.9; } }
         #animModal textarea {
             width: 100%; box-sizing: border-box; min-height: 90px;
             background: var(--bg-dark); border: 1px solid var(--border);
@@ -3298,7 +3300,8 @@ function driveImgPickRefresh() {
 // téléchargée est ensuite réduite côté navigateur (canvas) en une toute
 // petite vignette, pour rester légère en mémoire même avec beaucoup de photos.
 let _driveImgPickRenderGen = 0;         // jeton de génération : ignore les réponses obsolètes si on a changé de dossier/tri entre-temps
-const _driveImgThumbCache  = new Map(); // fileId -> data URL de la vignette réduite, réutilisée tant que la modale reste ouverte
+const _driveImgThumbCache  = new Map(); // fileId -> data URL de la vignette réduite ; persiste tant que l'onglet reste ouvert (voir closeDriveImgPickModal)
+const DRIVE_THUMB_CACHE_MAX = 600; // plafond de sécurité (chaque entrée ne pèse que quelques ko)
 const DRIVE_THUMB_PX = 56; // taille de la vignette générée (×2 environ la taille affichée, pour rester net sur écran haute densité)
 
 // Réduit une image (Blob) en une petite vignette carrée (recadrée façon
@@ -3331,8 +3334,9 @@ function _makeThumbDataUrl(blob) {
 async function driveImgPickLoadVisibleThumbs() {
     const gen = ++_driveImgPickRenderGen;
     const entries = _driveImgPickVisible;
-    const CONCURRENCY = 3; // modéré : chaque vignette implique de télécharger l'image entière
+    const CONCURRENCY = 6; // augmenté (était 3) : le réseau est le facteur limitant, pas le CPU — paralléliser davantage accélère l'affichage global
     let idx = 0;
+    let okCount = 0, errCount = 0, lastErr = null;
 
     async function worker() {
         while (idx < entries.length) {
@@ -3344,14 +3348,23 @@ async function driveImgPickLoadVisibleThumbs() {
                     const blob = await downloadDriveFileBlob(e.id);
                     dataUrl = await _makeThumbDataUrl(blob);
                     _driveImgThumbCache.set(e.id, dataUrl);
+                    if (_driveImgThumbCache.size > DRIVE_THUMB_CACHE_MAX) {
+                        _driveImgThumbCache.delete(_driveImgThumbCache.keys().next().value); // évince la plus ancienne entrée
+                    }
                 }
                 if (gen !== _driveImgPickRenderGen) continue; // la vue a changé pendant le téléchargement : on n'applique plus
                 const slot = document.querySelector(`[data-thumb-slot="${i}"]`);
-                if (slot) slot.outerHTML = `<img class="drive-img-thumb" src="${dataUrl}" alt="">`;
-            } catch (err) { /* silencieux : l'icône de repli 🖼 reste affichée pour ce fichier */ }
+                if (slot) { slot.outerHTML = `<img class="drive-img-thumb" src="${dataUrl}" alt="">`; okCount++; }
+            } catch (err) {
+                // Journalisé (au lieu de rester silencieux) pour pouvoir diagnostiquer
+                // précisément une éventuelle panne de vignette depuis le journal Drive.
+                errCount++; lastErr = err;
+                driveLog(`  ✗ vignette "${e.name}" : ${err && err.message ? err.message : err}`);
+            }
         }
     }
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, entries.length) }, worker));
+    driveLog(`  vignettes : ${okCount} affichée(s), ${errCount} en échec` + (lastErr ? ` (dernière erreur : ${lastErr.message || lastErr})` : ''));
 }
 
 function driveImgPickEnterFolder(i) {
@@ -3373,7 +3386,12 @@ function chooseDriveImg(i) {
 function closeDriveImgPickModal() {
     document.getElementById('driveImgPickModal').classList.remove('open');
     _driveImgPickCallback = null;
-    _driveImgThumbCache.clear(); // simples data URLs (pas de blob à révoquer)
+    // Le cache de vignettes N'EST PLUS vidé ici : ce sont de petites data URLs
+    // (quelques ko chacune), donc rien à révoquer, et les garder évite de
+    // retélécharger/recalculer les mêmes vignettes à chaque réouverture de la
+    // modale — gain de rapidité important en usage répété sur le même dossier.
+    // Un plafond (voir DRIVE_THUMB_CACHE_MAX) borne quand même la mémoire sur
+    // une très longue session.
 }
 
 async function loadImagesFromDrive() {
@@ -4904,9 +4922,10 @@ function animGedSelectIndividual(id) {
     if (animPendingPortrait) animData.portrait = animPendingPortrait;
     document.getElementById('animJson').value = JSON.stringify(animData, null, 2);
     document.getElementById('animGedResults').innerHTML = '';
-    const birthYearMatch = String(main.birt || '').match(/\d{4}/);
-    const displayName = animGedFullDisplayName(main);
-    document.getElementById('animGedSearch').value = birthYearMatch ? `${displayName} - ${birthYearMatch[0]}` : displayName;
+    // N'affiche que le Prénom + Nom (sans tiret ni année) : le champ sert aussi de
+    // zone de recherche, et un "- 1756" cassait la recherche (le terme "-" n'étant
+    // jamais présent dans le nom/date GEDCOM, plus aucun individu ne correspondait).
+    document.getElementById('animGedSearch').value = animGedFullDisplayName(main);
     document.getElementById('animStage').classList.remove('show');
     document.getElementById('animStage').innerHTML = '';
     document.getElementById('animLaunchBtn').disabled = false;
