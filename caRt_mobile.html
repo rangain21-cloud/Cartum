@@ -569,7 +569,7 @@
 
         /* Scène de marche */
         #animStage {
-            position: relative; width: 100%; min-height: 420px;
+            position: relative; width: 100%; min-height: 560px;
             background: linear-gradient(#1c2635, var(--bg-dark));
             border-radius: 10px; overflow: hidden; margin-top: 12px;
             border: 1px solid var(--border); display: none;
@@ -1110,6 +1110,8 @@
         <div id="animStage"></div>
 
         <div class="modal-btns" style="margin-top:14px">
+            <button class="btn btn-muted" id="animStopBtn" onclick="animStopWalk()">⏸ Stop</button>
+            <button class="btn btn-muted" id="animStartBtn" onclick="animStartWalk()">▶️ Start</button>
             <button class="btn btn-muted" onclick="closeAnimModal()">Fermer</button>
         </div>
     </div>
@@ -5318,7 +5320,7 @@ function animLaunch() {
     const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
 
     const figMetrics = animFigureMetrics(avatarPx);
-    const stageHeight  = Math.round(figMetrics.figureHeight * 3.6);
+    const stageHeight  = Math.round(figMetrics.figureHeight * 5);
     const walkDistance = stageHeight + figMetrics.figureHeight + 40; // pour que chacun traverse toute la scène
     stage.style.height = stageHeight + 'px';
 
@@ -5377,6 +5379,18 @@ function animPauseAndShowIndi(person) {
     animShowIndiModal(person);
 }
 function animResumeAnimation() {
+    document.querySelectorAll('#animStage .anim-figure').forEach(el => {
+        el.style.animationPlayState = 'running';
+    });
+}
+
+// ── Boutons Stop / Start (contrôle manuel du défilement) ──────────
+function animStopWalk() {
+    document.querySelectorAll('#animStage .anim-figure').forEach(el => {
+        el.style.animationPlayState = 'paused';
+    });
+}
+function animStartWalk() {
     document.querySelectorAll('#animStage .anim-figure').forEach(el => {
         el.style.animationPlayState = 'running';
     });
