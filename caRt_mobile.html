@@ -1074,12 +1074,12 @@
 
         <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
             <img id="animBgImgPreview" style="display:none;width:40px;height:40px;border-radius:6px;object-fit:cover;border:2px solid var(--accent)">
-            <label class="btn btn-muted btn-sm" style="flex:1;text-align:center;margin:0">
+            <label class="btn btn-muted btn-sm" style="flex:0 0 40%;text-align:center;margin:0">
                 🖼 Depuis l'appareil
                 <input type="file" id="animBgImgInput" accept="image/*" style="display:none" onchange="animSetBgImage(this)">
             </label>
-            <button class="btn btn-muted btn-sm" style="margin:0" onclick="animSetBgImageFromDrive()">☁️ Drive</button>
-            <button class="btn btn-muted btn-sm" id="animBgImgClearBtn" style="display:none" onclick="animClearBgImage()">✕</button>
+            <button class="btn btn-muted btn-sm" style="margin:0;flex:0 0 auto" onclick="animSetBgImageFromDrive()">☁️ Drive</button>
+            <button class="btn btn-muted btn-sm" id="animBgImgClearBtn" style="display:none;flex:0 0 auto" onclick="animClearBgImage()">✕</button>
         </div>
         <p class="anim-hint" style="margin-top:4px">Une image choisie ici remplace la carte comme fond de la scène.</p>
 
