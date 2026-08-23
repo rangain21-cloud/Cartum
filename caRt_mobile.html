@@ -530,7 +530,7 @@
             border-radius: 10px; padding: 6px 8px; margin-bottom: 6px;
         }
         .anim-rel-row .anim-avatar { width: 36px; height: 36px; flex-shrink: 0; }
-        .anim-rel-name { flex: 1; font-size: 0.8rem; min-width: 0; }
+        .anim-rel-name { flex: 0 0 18%; width: 18%; font-size: 0.8rem; min-width: 0; }
         .anim-rel-tag { font-size: 0.65rem; color: var(--text-muted); }
         .anim-indi-header {
             display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
@@ -1014,17 +1014,17 @@
             </label>
             <button class="btn btn-muted" id="animGedDriveBtn" onclick="animLoadGedFromDrive()">☁️ Depuis Drive (dossier Cartum)</button>
         </div>
-        <p class="anim-hint" id="animGedStatus" style="margin-top:4px"></p>
-        <div id="animGedDriveChoices" style="margin-top:4px"></div>
+        <p class="anim-hint" id="animGedStatus" style="margin-top:2px;margin-bottom:0"></p>
+        <div id="animGedDriveChoices" style="margin-top:2px"></div>
 
         <div id="animGedSearchBlock" style="display:none;margin-top:8px">
             <label class="anim-field-label">Rechercher l'individu (prénom, nom, année...)</label>
-            <input type="text" id="animGedSearch" class="search-input" placeholder="ex : Henri Ract 1756" oninput="animGedDoSearch()">
+            <input type="text" id="animGedSearch" class="search-input" style="width:25%" placeholder="ex : Henri Ract 1756" oninput="animGedDoSearch()">
             <div id="animGedResults" style="max-height:40vh;min-height:160px;overflow-y:auto;margin-top:6px"></div>
         </div>
 
-        <details style="margin-top:14px">
-        <summary class="anim-field-label" style="cursor:pointer;display:inline-block">2. Ou saisie manuelle (Geneanet / JSON)</summary>
+        <details style="margin-top:4px">
+        <summary class="anim-field-label" style="cursor:pointer;display:inline-block;margin:2px 0">2. Ou saisie manuelle (Geneanet / JSON)</summary>
 
         <label class="anim-field-label">Identifiant Geneanet de l'individu</label>
         <input type="text" id="animId" class="search-input" placeholder="ex : i=12345 ou p=jean&n=dupont">
@@ -1065,8 +1065,8 @@
 
         <label class="anim-field-label">3. Fond de scène (optionnel)</label>
         <div style="display:flex;gap:8px">
-            <input type="text" id="animMapProprio" class="search-input" style="flex:1" placeholder="IdProprio" list="animProprioList" oninput="animMapProprioChanged()">
-            <input type="text" id="animMapLot" class="search-input" style="flex:1" placeholder="IdLot" list="animMapLotList">
+            <input type="text" id="animMapProprio" class="search-input" style="flex:0 0 16%;width:16%" placeholder="IdProprio" list="animProprioList" oninput="animMapProprioChanged()">
+            <input type="text" id="animMapLot" class="search-input" style="flex:0 0 16%;width:16%" placeholder="IdLot" list="animMapLotList">
         </div>
         <datalist id="animProprioList"></datalist>
         <datalist id="animMapLotList"></datalist>
@@ -1095,14 +1095,14 @@
         <label class="anim-field-label" style="margin-top:10px">Taille du fond de scène (cadré à gauche)</label>
         <div style="display:flex;align-items:center;gap:10px">
             <input type="range" id="animBgZoomRange" min="0.5" max="10" step="0.1" value="1"
-                   style="flex:1" oninput="animBgZoom = parseFloat(this.value); document.getElementById('animBgZoomVal').textContent = animBgZoom.toFixed(2) + '×'; animApplyBgZoom();">
+                   style="flex:0 0 45%" oninput="animBgZoom = parseFloat(this.value); document.getElementById('animBgZoomVal').textContent = animBgZoom.toFixed(2) + '×'; animApplyBgZoom();">
             <span id="animBgZoomVal" class="anim-hint" style="min-width:44px;text-align:right">1.00×</span>
         </div>
 
         <label class="anim-field-label" style="margin-top:10px">Taille des portraits des individus</label>
         <div style="display:flex;align-items:center;gap:10px">
             <input type="range" id="animAvatarZoomRange" min="0.5" max="2.5" step="0.05" value="1"
-                   style="flex:1" oninput="animAvatarZoom = parseFloat(this.value); document.getElementById('animAvatarZoomVal').textContent = animAvatarZoom.toFixed(2) + '×'; animApplyAvatarZoom();">
+                   style="flex:0 0 45%" oninput="animAvatarZoom = parseFloat(this.value); document.getElementById('animAvatarZoomVal').textContent = animAvatarZoom.toFixed(2) + '×'; animApplyAvatarZoom();">
             <span id="animAvatarZoomVal" class="anim-hint" style="min-width:44px;text-align:right">1.00×</span>
         </div>
         <p class="anim-hint" style="margin-top:4px">S'applique immédiatement si l'animation est déjà en cours ; sinon, sera pris en compte au lancement.</p>
