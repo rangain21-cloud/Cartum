@@ -569,7 +569,7 @@
 
         /* Scène de marche */
         #animStage {
-            position: relative; width: 100%; min-height: 300px;
+            position: relative; width: 100%; min-height: 420px;
             background: linear-gradient(#1c2635, var(--bg-dark));
             border-radius: 10px; overflow: hidden; margin-top: 12px;
             border: 1px solid var(--border); display: none;
@@ -5318,7 +5318,7 @@ function animLaunch() {
     const step = avatarPx * (1 + GAP_RATIO); // pas horizontal entre deux personnages voisins
 
     const figMetrics = animFigureMetrics(avatarPx);
-    const stageHeight  = Math.round(figMetrics.figureHeight * 2.6);
+    const stageHeight  = Math.round(figMetrics.figureHeight * 3.6);
     const walkDistance = stageHeight + figMetrics.figureHeight + 40; // pour que chacun traverse toute la scène
     stage.style.height = stageHeight + 'px';
 
